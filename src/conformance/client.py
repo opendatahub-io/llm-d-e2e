@@ -45,12 +45,13 @@ class LLMClient:
         r.raise_for_status()
         return r.json()
 
-    def chat(self, model: str, prompt: str, max_tokens: int = 64, temperature: float = 0.1) -> dict:
+    def chat(self, model: str, prompt: str | list[dict], max_tokens: int = 64, temperature: float = 0.1) -> dict:
+        messages = prompt if isinstance(prompt, list) else [{"role": "user", "content": prompt}]
         r = self._client.post(
             "/v1/chat/completions",
             json={
                 "model": model,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
             },
