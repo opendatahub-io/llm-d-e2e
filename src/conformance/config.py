@@ -112,6 +112,18 @@ class ChatPrompt:
     content: str = ""
 
 
+def chat_prompt_to_messages(entry: dict | ChatPrompt) -> list[dict]:
+    """Convert a chatPrompts YAML entry (system/user keys) to OpenAI message dicts."""
+    if isinstance(entry, dict):
+        msgs = []
+        if "system" in entry:
+            msgs.append({"role": "system", "content": entry["system"]})
+        if "user" in entry:
+            msgs.append({"role": "user", "content": entry["user"]})
+        return msgs
+    return [{"role": entry.role, "content": entry.content}]
+
+
 @dataclass
 class ModelConfig:
     name: str = ""

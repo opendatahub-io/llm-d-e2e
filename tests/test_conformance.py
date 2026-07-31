@@ -9,7 +9,7 @@ Each test case runs through ordered phases:
   06. Ready — wait for LLMInferenceService Ready=True
   07. Health — GET /health returns 200
   08. Models — GET /v1/models lists the model
-  09. Inference — POST /v1/chat/completions returns tokens
+  09. Inference — POST /v1/chat/completions and /v1/completions return tokens
   10. Metrics — scrape and validate Prometheus metrics
   99. Cleanup — delete LLMInferenceService
 """
@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from conformance.benchmark import run_benchmark
-from conformance.config import TestCase
+from conformance.config import TestCase, chat_prompt_to_messages
 from conformance.client import LLMClient
 from conformance.deployer import Deployer
 from conformance.metrics import (
@@ -157,22 +157,43 @@ class TestConformance:
         models = [m["id"] for m in resp.get("data", [])]
         _log(f"Models listed: {models}")
         assert models, "No models returned"
+        assert tc.model.name in models, f"Expected model {tc.model.name!r} in /v1/models response, got {models}"
 
     def test_09_inference(self, client: LLMClient, tc: TestCase):
-        """Inference should return tokens for test prompts."""
+        """Inference should return tokens via /v1/chat/completions and /v1/completions."""
         if not tc.validation.inference_check:
             pytest.skip("inference check disabled")
-        prompts = tc.validation.test_prompts or ["What is 2+2?"]
-        for prompt in prompts:
-            _log(f"Sending prompt: '{prompt[:50]}...'")
-            resp = client.chat(model=tc.model.name, prompt=prompt)
+
+        def _assert_chat_response(resp: dict, label: str):
             choices = resp.get("choices", [])
-            assert choices, f"No choices returned for prompt: {prompt}"
+            assert choices, f"No choices returned for {label}"
             content = choices[0].get("message", {}).get("content") or ""
             tokens = resp.get("usage", {}).get("total_tokens", 0)
             _log(f"Response: '{content[:80]}...' ({tokens} tokens)")
-            assert content or tokens > 0, f"Empty response for prompt: {prompt}"
-            assert tokens > 0, "No tokens generated"
+            assert content or tokens > 0, f"Empty response for {label}"
+            assert tokens > 0, f"No tokens generated for {label}"
+
+        plain_prompts = tc.validation.test_prompts or ["What is 2+2?"]
+
+        if tc.validation.chat_prompts:
+            for entry in tc.validation.chat_prompts:
+                messages = chat_prompt_to_messages(entry)
+                assert messages, f"chatPrompts entry has no 'system' or 'user' key: {entry}"
+                _log(f"Sending chat prompt ({len(messages)} message(s)): '{messages[-1]['content'][:50]}...'")
+                resp = client.chat(model=tc.model.name, prompt=messages)
+                _assert_chat_response(resp, "chat prompt")
+        else:
+            for prompt in plain_prompts:
+                _log(f"Sending prompt: '{prompt[:50]}...'")
+                resp = client.chat(model=tc.model.name, prompt=prompt)
+                _assert_chat_response(resp, f"prompt: {prompt}")
+
+        for prompt in plain_prompts:
+            _log(f"Sending completions prompt: '{prompt[:50]}...'")
+            resp = client.completions(model=tc.model.name, prompt=prompt)
+            choices = resp.get("choices", [])
+            assert choices, f"/v1/completions: no choices for prompt: {prompt}"
+            assert resp.get("usage", {}).get("total_tokens", 0) > 0, "/v1/completions: no tokens generated"
 
     def test_10_metrics_vllm(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """vLLM metrics should show successful requests."""

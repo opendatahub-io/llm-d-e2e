@@ -633,6 +633,112 @@ def test_check_operator_image_issues_parses_image_pull_back_off(monkeypatch):
     assert "kserve-ctrl-abc" in issues[0]
 
 
+def test_chat_string_prompt_wraps_as_user_message(monkeypatch):
+    """chat() with a plain string should wrap it as [{'role': 'user', 'content': ...}]."""
+    captured = {}
+
+    def fake_post(url, json=None, **kwargs):
+        captured["json"] = json
+
+        class FakeResp:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 1}}
+
+        return FakeResp()
+
+    c = LLMClient(base_url="http://localhost:8000")
+    monkeypatch.setattr(c._client, "post", fake_post)
+    c.chat(model="test-model", prompt="hello")
+    assert captured["json"]["messages"] == [{"role": "user", "content": "hello"}]
+    c.close()
+
+
+def test_chat_list_prompt_passes_through(monkeypatch):
+    """chat() with a list of message dicts should pass them through unmodified."""
+    captured = {}
+
+    def fake_post(url, json=None, **kwargs):
+        captured["json"] = json
+
+        class FakeResp:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 1}}
+
+        return FakeResp()
+
+    msgs = [{"role": "system", "content": "You are helpful."}, {"role": "user", "content": "hi"}]
+    c = LLMClient(base_url="http://localhost:8000")
+    monkeypatch.setattr(c._client, "post", fake_post)
+    c.chat(model="test-model", prompt=msgs)
+    assert captured["json"]["messages"] == msgs
+    c.close()
+
+
+def test_env_overrides_applied_to_decode_and_prefill():
+    """_patch_manifest should inject env_overrides into main containers of both templates."""
+    import yaml
+    from conformance.deployer import Deployer
+    from conformance.config import load_testcase
+    from pathlib import Path
+    import tempfile
+
+    manifest = {
+        "apiVersion": "serving.kserve.io/v1alpha2",
+        "kind": "LLMInferenceService",
+        "metadata": {"name": "test"},
+        "spec": {
+            "model": {"uri": "hf://test/model", "name": "test/model"},
+            "template": {
+                "containers": [
+                    {"name": "main", "env": [{"name": "EXISTING", "value": "keep"}]},
+                ]
+            },
+            "prefill": {
+                "replicas": 1,
+                "template": {
+                    "containers": [
+                        {"name": "main", "env": [{"name": "EXISTING", "value": "keep"}]},
+                    ]
+                },
+            },
+        },
+    }
+
+    tc = load_testcase("configs/testcases/single-gpu-smoke.yaml")
+    tc.deployment.env_overrides = {"FOO": "bar", "EXISTING": "overwritten"}
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(manifest, f)
+        tmp = f.name
+
+    try:
+        d = Deployer()
+        result = d._patch_manifest(Path(tmp), tc)
+        spec = result["spec"]
+
+        for section_name in ("template", "prefill"):
+            if section_name == "prefill":
+                containers = spec["prefill"]["template"]["containers"]
+            else:
+                containers = spec["template"]["containers"]
+            main = [c for c in containers if c["name"] == "main"][0]
+            env_dict = {e["name"]: e["value"] for e in main["env"]}
+            assert env_dict["FOO"] == "bar", f"{section_name}: FOO not injected"
+            assert env_dict["EXISTING"] == "overwritten", f"{section_name}: EXISTING not overwritten"
+    finally:
+        Path(tmp).unlink()
+
+
 def test_new_testcase_script_rejects_duplicate(tmp_path, monkeypatch):
     """new-testcase.sh must refuse to overwrite an existing config."""
     import subprocess

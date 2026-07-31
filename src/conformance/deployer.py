@@ -828,44 +828,65 @@ class Deployer:
             if prefill:
                 prefill.setdefault("template", {})["nodeSelector"] = self.prefill_node_selector
 
+        if tc.deployment.env_overrides:
+            for container in self._main_containers(spec):
+                env_list = container.setdefault("env", [])
+                existing = {e.get("name"): i for i, e in enumerate(env_list) if e.get("name")}
+                for k, v in tc.deployment.env_overrides.items():
+                    entry = {"name": k, "value": v}
+                    if k in existing:
+                        env_list[existing[k]] = entry
+                    else:
+                        env_list.append(entry)
+
         return manifest
 
+    @staticmethod
+    def _pod_templates(spec: dict) -> list[dict]:
+        """Return pod template dicts for both decode (spec.template) and prefill (spec.prefill.template)."""
+        templates = [spec.get("template", {})]
+        prefill_tmpl = spec.get("prefill", {}).get("template", {})
+        if prefill_tmpl:
+            templates.append(prefill_tmpl)
+        return templates
+
+    @staticmethod
+    def _main_containers(spec: dict) -> list[dict]:
+        """Return the 'main' container dict from each pod template."""
+        return [c for t in Deployer._pod_templates(spec) for c in t.get("containers", []) if c.get("name") == "main"]
+
     def _replace_vllm_image(self, spec: dict, image: str, model_name: str = ""):
-        for template_key in ("template", "prefill"):
-            template = spec.get(template_key, {})
-            for container in template.get("containers", []):
-                if container.get("name") == "main":
-                    container["image"] = image
-                    container["command"] = ["/app/llm-d-inference-sim"]
-                    sim_model = "sim-model"
-                    container["args"] = [
-                        "--model",
-                        sim_model,
-                        "--served-model-name",
-                        model_name or sim_model,
-                        "--port",
-                        "8000",
-                        "--self-signed-certs",
-                        "--mode",
-                        "random",
-                        "--enable-kvcache",
-                        "true",
-                    ]
-                    env_list = container.setdefault("env", [])
-                    if not any(e.get("name") == "POD_IP" for e in env_list):
-                        env_list.append(
-                            {
-                                "name": "POD_IP",
-                                "valueFrom": {"fieldRef": {"fieldPath": "status.podIP"}},
-                            }
-                        )
-                    resources = container.get("resources", {})
-                    for section in ("limits", "requests"):
-                        resources.get(section, {}).pop("nvidia.com/gpu", None)
+        for container in self._main_containers(spec):
+            container["image"] = image
+            container["command"] = ["/app/llm-d-inference-sim"]
+            sim_model = "sim-model"
+            container["args"] = [
+                "--model",
+                sim_model,
+                "--served-model-name",
+                model_name or sim_model,
+                "--port",
+                "8000",
+                "--self-signed-certs",
+                "--mode",
+                "random",
+                "--enable-kvcache",
+                "true",
+            ]
+            env_list = container.setdefault("env", [])
+            if not any(e.get("name") == "POD_IP" for e in env_list):
+                env_list.append(
+                    {
+                        "name": "POD_IP",
+                        "valueFrom": {"fieldRef": {"fieldPath": "status.podIP"}},
+                    }
+                )
+            resources = container.get("resources", {})
+            for section in ("limits", "requests"):
+                resources.get(section, {}).pop("nvidia.com/gpu", None)
 
     def _inject_pull_secret(self, spec: dict, secret_name: str):
-        for template_key in ("template", "prefill"):
-            template = spec.get(template_key, {})
+        for template in self._pod_templates(spec):
             if template:
                 secrets = template.setdefault("imagePullSecrets", [])
                 if not any(s.get("name") == secret_name for s in secrets):
