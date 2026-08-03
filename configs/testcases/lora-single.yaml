@@ -1,0 +1,43 @@
+name: lora-single
+description: "Single LoRA adapter smoke test — HF adapter with inference validation"
+model:
+  name: facebook/opt-125m
+  uri: hf://facebook/opt-125m
+  displayName: opt-125m-lora-single
+  category: lora
+  cache:
+    enabled: true
+    storageSize: 10Gi
+    keepPVC: true
+    timeout: 15m
+  lora:
+    adapters:
+      - name: sql-adapter
+        uri: hf://edbeeching/opt-125m-lora
+deployment:
+  manifestPath: lora-single.yaml
+  replicas: 1
+  readyTimeout: 10m
+  resources:
+    cpu: "2"
+    memory: 8Gi
+    gpus: 1
+    rdma: false
+validation:
+  healthEndpoint: /health
+  healthPort: 8000
+  healthScheme: HTTPS
+  inferenceCheck: true
+  testPrompts:
+    - "What is SQL?"
+  expectedCodes: [200]
+  timeout: 2m
+  retryAttempts: 3
+  retryInterval: 15s
+  metricsCheck:
+    enabled: true
+    checkVLLM: true
+    checkEPP: true
+    checkScheduler: true
+    checkLora: true
+cleanup: true

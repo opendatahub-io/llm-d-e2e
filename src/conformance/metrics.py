@@ -43,6 +43,9 @@ SCHED_REQUEST_ERROR = "inference_objective_request_error_total"
 POOL_READY_PODS = "inference_pool_ready_pods"
 PREFIX_INDEXER_SIZE = "inference_extension_prefix_indexer_size"
 
+# LoRA metrics (vLLM reports adapter state via lora_requests_info)
+VLLM_LORA_REQUESTS_INFO = "vllm:lora_requests_info"
+
 # Flow Control metrics
 FC_DISPATCH_CYCLE = "inference_extension_flow_control_dispatch_cycle_duration_seconds_count"
 FC_POOL_SATURATION = "inference_extension_flow_control_pool_saturation"
@@ -546,6 +549,24 @@ def validate_flow_control(epp: list[ScrapeResult]) -> list[CheckResult]:
                 value=dispatched or 0,
                 passed=dispatched is not None and dispatched > 0,
                 message=f"request_queue_dispatched_count={dispatched}",
+            )
+        )
+    return checks
+
+
+def validate_lora(vllm: list[ScrapeResult]) -> list[CheckResult]:
+    """Validate LoRA adapter metrics from vLLM workload pods."""
+    checks = []
+    for r in vllm:
+        lora_info = r.get(VLLM_LORA_REQUESTS_INFO)
+        checks.append(
+            CheckResult(
+                name="lora_requests_info",
+                metric=VLLM_LORA_REQUESTS_INFO,
+                source=r.source,
+                value=lora_info or 0,
+                passed=lora_info is not None,
+                message=f"lora_requests_info={'present' if lora_info is not None else 'missing'}",
             )
         )
     return checks
