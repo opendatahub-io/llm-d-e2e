@@ -1,0 +1,12 @@
+name: "3.5"
+description: "RHOAI 3.5 conformance tests"
+platform: any
+testCases:
+  - single-gpu
+  - cache-aware
+  - flow-control
+  - flow-control-tokens
+  - lora-single
+  - lora-multi
+parallel: false
+timeout: 120m
