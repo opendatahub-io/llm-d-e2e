@@ -63,7 +63,7 @@ cleanup: true
 EOF
 
 cat > "$MANIFEST" << EOF
-apiVersion: serving.kserve.io/v1alpha1
+apiVersion: serving.kserve.io/v1alpha2
 kind: LLMInferenceService
 metadata:
   name: ${NAME}
@@ -79,7 +79,6 @@ spec:
         - name: rhai-pull-secret
         containers:
         - name: main
-        - name: tokenizer
     route: {}
     gateway: {}
   template:

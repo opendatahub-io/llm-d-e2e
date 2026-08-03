@@ -633,6 +633,37 @@ def test_check_operator_image_issues_parses_image_pull_back_off(monkeypatch):
     assert "kserve-ctrl-abc" in issues[0]
 
 
+def test_load_lora_single_testcase():
+    """LoRA single-adapter testcase YAML should parse correctly."""
+    tc = load_testcase("configs/testcases/lora-single.yaml")
+    assert tc.name == "lora-single"
+    assert tc.model.lora is not None
+    assert len(tc.model.lora.adapters) == 1
+    assert tc.model.lora.adapters[0]["name"] == "sql-adapter"
+    assert tc.model.lora.adapters[0]["uri"] == "hf://edbeeching/opt-125m-lora"
+    assert tc.model.lora.max_adapters == 0
+    assert tc.validation.metrics_check.check_lora is True
+
+
+def test_load_lora_multi_testcase():
+    """LoRA multi-adapter testcase YAML should parse with all adapters and settings."""
+    tc = load_testcase("configs/testcases/lora-multi.yaml")
+    assert tc.name == "lora-multi"
+    assert tc.model.lora is not None
+    assert len(tc.model.lora.adapters) == 2
+    adapter_names = [a["name"] for a in tc.model.lora.adapters]
+    assert "sql-adapter" in adapter_names
+    assert "code-adapter" in adapter_names
+    assert tc.model.lora.max_rank == 64
+    assert tc.model.lora.max_adapters == 2
+
+
+def test_load_testcase_without_lora():
+    """Testcase YAML without LoRA should have lora=None."""
+    tc = load_testcase("configs/testcases/single-gpu-smoke.yaml")
+    assert tc.model.lora is None
+
+
 def test_chat_string_prompt_wraps_as_user_message(monkeypatch):
     """chat() with a plain string should wrap it as [{'role': 'user', 'content': ...}]."""
     captured = {}

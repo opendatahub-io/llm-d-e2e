@@ -30,6 +30,7 @@ from conformance.metrics import (
     dump_raw_metrics,
     validate_cache_aware,
     validate_flow_control,
+    validate_lora,
     validate_pd,
     validate_scheduler,
     validate_vllm_basic,
@@ -158,6 +159,11 @@ class TestConformance:
         _log(f"Models listed: {models}")
         assert models, "No models returned"
         assert tc.model.name in models, f"Expected model {tc.model.name!r} in /v1/models response, got {models}"
+        if tc.model.lora and tc.model.lora.adapters:
+            for adapter in tc.model.lora.adapters:
+                name = adapter["name"]
+                assert name in models, f"LoRA adapter {name!r} not in /v1/models, got {models}"
+            _log(f"All {len(tc.model.lora.adapters)} LoRA adapter(s) registered")
 
     def test_09_inference(self, client: LLMClient, tc: TestCase):
         """Inference should return tokens via /v1/chat/completions and /v1/completions."""
@@ -194,6 +200,13 @@ class TestConformance:
             choices = resp.get("choices", [])
             assert choices, f"/v1/completions: no choices for prompt: {prompt}"
             assert resp.get("usage", {}).get("total_tokens", 0) > 0, "/v1/completions: no tokens generated"
+
+        if tc.model.lora and tc.model.lora.adapters:
+            for adapter in tc.model.lora.adapters:
+                adapter_name = adapter["name"]
+                _log(f"Sending LoRA inference with adapter '{adapter_name}'...")
+                resp = client.chat(model=adapter_name, prompt="Test LoRA adapter inference")
+                _assert_chat_response(resp, f"LoRA adapter: {adapter_name}")
 
     def test_10_metrics_vllm(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """vLLM metrics should show successful requests."""
@@ -297,6 +310,22 @@ class TestConformance:
             _log(f"  {c.name}: {'PASS' if c.passed else 'FAIL'} — {c.message}")
         failed = [c for c in checks if not c.passed]
         assert not failed, f"Flow control metric checks failed: {[c.message for c in failed]}"
+
+    def test_15_metrics_lora(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
+        """LoRA metrics should show adapter state on vLLM pods."""
+        _require_deployed(deployer, tc, test_mode)
+        mc = tc.validation.metrics_check
+        if not mc.enabled or not mc.check_lora:
+            pytest.skip("LoRA metrics check disabled")
+        _log("Scraping LoRA metrics from vLLM pods...")
+        vllm = scraper.scrape_vllm(tc.name)
+        _log(f"Scraped {len(vllm)} pod(s)")
+        assert vllm, "No vLLM metrics scraped"
+        checks = validate_lora(vllm)
+        for c in checks:
+            _log(f"  {c.name}: {'PASS' if c.passed else 'FAIL'} — {c.message}")
+        failed = [c for c in checks if not c.passed]
+        assert not failed, f"LoRA metric checks failed: {[c.message for c in failed]}"
 
     def test_20_benchmark(self, deployer: Deployer, tc: TestCase, test_mode: str, guidellm_image: str):
         """Run GuideLLM benchmark and check performance thresholds."""

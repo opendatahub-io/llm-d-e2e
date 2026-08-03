@@ -1,0 +1,8 @@
+name: lora
+description: "LoRA adapter conformance tests — single, multi, PVC"
+platform: any
+testCases:
+  - lora-single
+  - lora-multi
+parallel: false
+timeout: 60m

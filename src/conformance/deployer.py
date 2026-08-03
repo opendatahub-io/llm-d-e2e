@@ -807,11 +807,13 @@ class Deployer:
             model = spec.setdefault("model", {})
             model["name"] = tc.model.name
             model["uri"] = tc.model.uri
-            self._replace_vllm_image(spec, self.mock_image, tc.model.name)
+            self._inject_lora_spec(model, tc.model.lora)
+            self._replace_vllm_image(spec, self.mock_image, tc.model.name, lora=tc.model.lora)
         elif tc.model.uri:
             model = spec.setdefault("model", {})
             model["uri"] = tc.model.uri
             model["name"] = tc.model.name
+            self._inject_lora_spec(model, tc.model.lora)
 
         if self.pull_secret:
             self._inject_pull_secret(spec, self.pull_secret)
@@ -855,7 +857,19 @@ class Deployer:
         """Return the 'main' container dict from each pod template."""
         return [c for t in Deployer._pod_templates(spec) for c in t.get("containers", []) if c.get("name") == "main"]
 
-    def _replace_vllm_image(self, spec: dict, image: str, model_name: str = ""):
+    @staticmethod
+    def _inject_lora_spec(model: dict, lora) -> None:
+        """Inject spec.model.lora block from LoRAConfig into the manifest."""
+        if not lora or not lora.adapters:
+            return
+        lora_spec: dict = {"adapters": lora.adapters}
+        if lora.max_rank:
+            lora_spec["maxRank"] = lora.max_rank
+        if lora.max_adapters:
+            lora_spec["maxAdapters"] = lora.max_adapters
+        model["lora"] = lora_spec
+
+    def _replace_vllm_image(self, spec: dict, image: str, model_name: str = "", lora=None):
         for container in self._main_containers(spec):
             container["image"] = image
             container["command"] = ["/app/llm-d-inference-sim"]
@@ -873,6 +887,14 @@ class Deployer:
                 "--enable-kvcache",
                 "true",
             ]
+            if lora and lora.adapters:
+                container["args"].append("--lora-modules")
+                for adapter in lora.adapters:
+                    container["args"].append(
+                        json.dumps({"name": adapter["name"], "path": f"/fake/lora/{adapter['name']}"})
+                    )
+                if lora.max_adapters:
+                    container["args"].extend(["--max-loras", str(lora.max_adapters)])
             env_list = container.setdefault("env", [])
             if not any(e.get("name") == "POD_IP" for e in env_list):
                 env_list.append(

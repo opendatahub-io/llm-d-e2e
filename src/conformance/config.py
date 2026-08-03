@@ -70,6 +70,7 @@ class MetricsCheck:
     check_scheduler: bool = False
     check_flow_control: bool = False
     check_nixl: bool = False
+    check_lora: bool = False
 
 
 @dataclass
@@ -107,6 +108,13 @@ class BenchmarkConfig:
 
 
 @dataclass
+class LoRAConfig:
+    adapters: list[dict] = field(default_factory=list)
+    max_rank: int = 0
+    max_adapters: int = 0
+
+
+@dataclass
 class ChatPrompt:
     role: str = "user"
     content: str = ""
@@ -131,6 +139,7 @@ class ModelConfig:
     display_name: str = ""
     category: str = ""
     cache: CacheConfig = field(default_factory=CacheConfig)
+    lora: LoRAConfig | None = None
 
 
 @dataclass
@@ -207,6 +216,8 @@ def _build(cls, data: dict | None):
             kwargs[snake_key] = parse_duration(val)
         elif hint == "CacheConfig" or (isinstance(hint, str) and "CacheConfig" in str(hint)):
             kwargs[snake_key] = _build(CacheConfig, val) if val else CacheConfig()
+        elif "LoRAConfig" in str(hint):
+            kwargs[snake_key] = _build(LoRAConfig, val) if val else None
         elif "ResourceConfig" in str(hint):
             kwargs[snake_key] = _build(ResourceConfig, val) if val else ResourceConfig()
         elif "ParallelismConfig" in str(hint):

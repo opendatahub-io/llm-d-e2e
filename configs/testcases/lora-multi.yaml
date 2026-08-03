@@ -1,0 +1,47 @@
+name: lora-multi
+description: "Multiple LoRA adapters — validates /v1/models lists all, inference works with each"
+model:
+  name: facebook/opt-125m
+  uri: hf://facebook/opt-125m
+  displayName: opt-125m-lora-multi
+  category: lora
+  cache:
+    enabled: true
+    storageSize: 10Gi
+    keepPVC: true
+    timeout: 15m
+  lora:
+    adapters:
+      - name: sql-adapter
+        uri: hf://edbeeching/opt-125m-lora
+      - name: code-adapter
+        uri: hf://velaa/opt-125m-lora-finetuned-mnli
+    maxAdapters: 2
+    maxRank: 64
+deployment:
+  manifestPath: lora-multi.yaml
+  replicas: 1
+  readyTimeout: 10m
+  resources:
+    cpu: "2"
+    memory: 8Gi
+    gpus: 1
+    rdma: false
+validation:
+  healthEndpoint: /health
+  healthPort: 8000
+  healthScheme: HTTPS
+  inferenceCheck: true
+  testPrompts:
+    - "What is SQL?"
+  expectedCodes: [200]
+  timeout: 2m
+  retryAttempts: 3
+  retryInterval: 15s
+  metricsCheck:
+    enabled: true
+    checkVLLM: true
+    checkEPP: true
+    checkScheduler: true
+    checkLora: true
+cleanup: true
