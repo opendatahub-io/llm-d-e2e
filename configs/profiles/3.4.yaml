@@ -1,0 +1,9 @@
+name: "3.4"
+description: "RHOAI 3.4 conformance tests"
+platform: any
+testCases:
+  - single-gpu
+  - single-gpu-no-scheduler
+  - cache-aware
+parallel: false
+timeout: 120m
