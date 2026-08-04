@@ -78,6 +78,9 @@ e2e -t single-gpu --nocleanup
 # Simulate vLLM with llm-d-inference-sim (no GPU needed)
 e2e -t single-gpu --mock
 
+# Run test require GPU (requiresGpu) — skipped on CPU only clsuter by default; opt in on a GPU cluster
+e2e -t kv-offloading-cpu --need-gpu
+
 # Verbose output, stop on first failure
 e2e -t single-gpu -v -x
 

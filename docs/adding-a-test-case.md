@@ -122,6 +122,7 @@ cleanup: true
 | `deployment.replicas` | Expected replica count (used to verify pods) |
 | `deployment.readyTimeout` | How long to wait for Ready=True (string: `10m`, `2h`) |
 | `deployment.resources.gpus` | GPU count per replica (stripped in `--mock` mode) |
+| `deployment.requiresGpu` | If `true`, the test case is **skipped unless `--need-gpu` is passed** (see [GPU Gate](#gpu-gate)) |
 | `validation.testPrompts` | Prompts sent to `/v1/chat/completions` |
 | `validation.chatPrompts` | Alternative: structured `[{system, user}]` prompts for prefix cache testing |
 | `cleanup` | Delete the LLMInferenceService after tests complete |
@@ -258,6 +259,41 @@ When `--mock` is used, the framework patches your manifest before applying:
 4. The EPP/scheduler config from the manifest is **not changed** — it runs as-is
 
 This means your manifest's scheduler/EPP config must be compatible with the RHAII version installed on the cluster, even in mock mode.
+
+## GPU Gate
+
+Some test cases need a real GPU to run at all. For example `kv-offloading-cpu` offloads the KV cache *to* CPU memory, but the model still runs on a GPU. To keep these out of CPU-only cluster, a test case marks its need with `requiresGpu: true`. Such test cases are **skipped by default** and run only when you pass **`--need-gpu`**.
+
+### Mark a test case as needing a GPU
+
+```yaml
+deployment:
+  manifestPath: kv-offloading-cpu.yaml
+  requiresGpu: true       #  skipped unless --need-gpu is passed
+```
+
+### How it behaves
+
+| Situation | Result |
+|---|---|
+| `requiresGpu: false` (default) | Never gated — runs everywhere |
+| `requiresGpu: true`, no `--need-gpu` | **SKIPPED** — "requires a GPU — pass --need-gpu to run it" |
+| `requiresGpu: true`, `--need-gpu`, cluster has GPUs | Runs |
+| `requiresGpu: true`, `--need-gpu`, cluster has **no** GPU | **SKIPPED** (safety net — avoids pods stuck Pending) |
+| `requiresGpu: true`, `--mock` | Runs — mock strips GPU requests, so no GPU is needed |
+
+The check runs in the earliest phases (`test_01_prereq` / `test_02_deploy`), so when
+it skips, all downstream phases skip too. When `--need-gpu` is set, GPU capacity is
+queried once via `kubectl get nodes` (allocatable `nvidia.com/gpu` summed across
+nodes) and cached, as a safety net.
+
+### Run GPU-only test cases
+
+On a GPU cluster, opt in explicitly:
+
+```bash
+e2e -t kv-offloading-cpu --need-gpu -v
+```
 
 ## Version Compatibility
 
@@ -651,6 +687,7 @@ Both use `name: my-new-test` matching the filename, so `manifestPath` resolves c
 - [ ] Test case config created in `configs/testcases/<name>.yaml`
 - [ ] `deployment.manifestPath` matches the manifest filename
 - [ ] `metricsCheck` flags match the deployment topology
+- [ ] `deployment.requiresGpu: true` set if the test case needs a real GPU (see [GPU Gate](#gpu-gate))
 - [ ] Added to relevant profile(s) in `configs/profiles/`
 - [ ] `--list-testcases` shows `✓` for the new test case
 - [ ] Test passes in mock mode (`--mock`)

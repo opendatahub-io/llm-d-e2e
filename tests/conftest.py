@@ -71,6 +71,11 @@ def pytest_addoption(parser):
     parser.addoption("--bearer-token", default="", help="Bearer token for auth")
     parser.addoption("--disable-auth", action="store_true", help="Disable WASM auth")
     parser.addoption("--nocleanup", action="store_true", help="Keep resources after test")
+    parser.addoption(
+        "--need-gpu",
+        action="store_true",
+        help="Run requiresGpu test cases (they are skipped by default; use on a GPU cluster)",
+    )
     parser.addoption("--storage-class", default="", help="StorageClass for PVC")
     parser.addoption("--storage-size", default="", help="Override PVC size")
     parser.addoption("--guidellm-image", default="", help="GuideLLM benchmark image override")
@@ -168,6 +173,11 @@ def scraper(deployer: Deployer) -> Scraper:
 @pytest.fixture(scope="session")
 def no_cleanup(request) -> bool:
     return request.config.getoption("--nocleanup")
+
+
+@pytest.fixture(scope="session")
+def need_gpu(request) -> bool:
+    return bool(request.config.getoption("--need-gpu"))
 
 
 @pytest.fixture(scope="session")
