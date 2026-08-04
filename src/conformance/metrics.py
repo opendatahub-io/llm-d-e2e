@@ -74,6 +74,13 @@ FC_POOL_SATURATION = "inference_extension_flow_control_pool_saturation"
 FC_REQUEST_ENQUEUE = "inference_extension_flow_control_request_enqueue_duration_seconds_count"
 FC_QUEUE_DURATION = "inference_extension_flow_control_request_queue_duration_seconds_count"
 
+
+# KV-cache offloading metrics (vLLM native offloading KV connector).
+# Legacy (vLLM 0.23.x and the native CPU offloading backend): kv_offload_total_bytes_total deprecated in vLLM >= 0.26 but still emitted for CPUOffloadingSpec.
+# KV_OFFLOAD_STORE_BYTES = "vllm:kv_offload_store_bytes_total"  # GPU -> offload storage
+# KV_OFFLOAD_LOAD_BYTES = "vllm:kv_offload_load_bytes_total"  # offload storage -> GPU
+KV_OFFLOAD_TOTAL_BYTES = "vllm:kv_offload_total_bytes_total"  # deprecated legacy counter
+
 # Label patterns for pod discovery
 WORKLOAD_LABEL = "app.kubernetes.io/name={name},app.kubernetes.io/component=llminferenceservice-workload"
 PREFILL_LABEL = "app.kubernetes.io/name={name},app.kubernetes.io/component=llminferenceservice-workload-prefill"
@@ -591,4 +598,70 @@ def validate_lora(vllm: list[ScrapeResult]) -> list[CheckResult]:
                 message=f"lora_requests_info={'present' if lora_info is not None else 'missing'}",
             )
         )
+    return checks
+
+
+def validate_kvcache_offloading_cpu(vllm: list[ScrapeResult]) -> list[CheckResult]:
+    checks = []
+    total_offloaded = 0.0  # aggregated value when we have multiple vllm pods
+    for r in vllm:
+        offloaded = r.get(KV_OFFLOAD_TOTAL_BYTES)
+        if offloaded is not None:
+            total_offloaded += offloaded
+        checks.append(
+            CheckResult(
+                name="kv_offload_bytes",
+                metric=KV_OFFLOAD_TOTAL_BYTES,  # we need extend this in later version
+                source=r.source,
+                value=offloaded or 0,
+                passed=True,  # dont care only need total_offloaded to be increased
+                message=(
+                    f"kv_offload_total_bytes={offloaded}"
+                    if offloaded is not None
+                    else "kv offload metric not exposed on this pod"
+                ),
+            )
+        )
+    checks.append(
+        CheckResult(
+            name="kv_offload_total",
+            metric=KV_OFFLOAD_TOTAL_BYTES,
+            source="aggregate",
+            value=total_offloaded,
+            passed=total_offloaded > 0,
+            message=f"total_kv_offload_bytes={total_offloaded}",
+        )
+    )
+    return checks
+
+
+def validate_kvcache_offloading_fs(
+    usage_by_pod: dict[str, int | None], path: str, min_bytes: int = 1048576
+) -> list[CheckResult]:
+    metric = f"disk_usage:{path}"
+    checks = []
+    total_used = 0
+    for pod, used in usage_by_pod.items():
+        if used is not None:
+            total_used += used
+        checks.append(
+            CheckResult(
+                name="kv_offload_fs_bytes",
+                metric=metric,
+                source=pod,
+                value=used or 0,
+                passed=True,
+                message=(f"{path} uses {used} bytes" if used is not None else f"{path} not present on this pod"),
+            )
+        )
+    checks.append(
+        CheckResult(
+            name="kv_offload_fs_total",
+            metric=metric,
+            source="aggregate",
+            value=total_used,
+            passed=total_used > min_bytes,
+            message=f"total_fs_offload_bytes={total_used} under {path} (threshold {min_bytes})",
+        )
+    )
     return checks

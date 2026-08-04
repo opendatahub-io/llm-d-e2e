@@ -1,0 +1,8 @@
+name: kv-cache-offloading
+description: "KV Cache offloading for CPU only and Tiered to FS tests"
+platform: any
+testCases:
+  - kv-offloading-cpu
+  - kv-offloading-tiered
+parallel: false
+timeout: 30m

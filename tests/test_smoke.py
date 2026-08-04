@@ -8,8 +8,8 @@ Coverage areas:
   Config — duration parsing; load testcase/profile/dir; LoRA single/multi YAML
   Metrics — Prometheus text exposition parsing
   Client — bearer token headers; chat() string vs message-list prompts
-  Deployer — is_deployed tracking; webhook/CRD transient apply retries;
-    wait_for_ready persistent-error fast-fail and timeout messages;
+  Deployer — is_deployed tracking; workload pod listing; webhook/CRD transient
+    apply retries; wait_for_ready persistent-error fast-fail and timeout messages;
     operator ImagePullBackOff surfacing; env_overrides on decode+prefill
   Manifests — --setup pruning of stale YAML; _require_manifest skip helpers
   Scaffolding — scripts/new-testcase.sh generates loadable config; rejects dupes
@@ -118,6 +118,15 @@ def test_cluster_gpu_count_total(monkeypatch):
     # jsonpath output: one line per node, blank for nodes without GPUs.
     monkeypatch.setattr(d, "kubectl", lambda *a, **k: "1\n\n2\n")
     assert d.cluster_gpu_count() == 3
+
+
+def test_list_workload_pods_parses_and_filters_blanks(monkeypatch):
+    """list_workload_pods returns pod names from jsonpath output, dropping blank lines."""
+    from conformance.deployer import Deployer
+
+    d = Deployer()
+    monkeypatch.setattr(d, "kubectl", lambda *a, **k: "pod-a\n\npod-b\n")
+    assert d.list_workload_pods("my-isvc") == ["pod-a", "pod-b"]
 
 
 def test_require_gpu_skips_when_flag_not_set():

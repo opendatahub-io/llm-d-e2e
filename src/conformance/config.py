@@ -91,6 +91,8 @@ class MetricsCheck:
     check_flow_control: bool = False
     check_nixl: bool = False
     check_lora: bool = False
+    check_kvcache_offloading: bool = False
+    check_kvcache_offloading_fs: bool = False
 
 
 @dataclass
@@ -185,12 +187,16 @@ class ValidateConfig:
     health_scheme: str = "HTTPS"
     inference_check: bool = True
     test_prompts: list[str] = field(default_factory=list)
+    # Send each prompt this many times (unique prefix per iteration) to build KV load.
+    inference_repeat: int = 1
     chat_prompts: list[ChatPrompt] = field(default_factory=list)
     expected_codes: list[int] = field(default_factory=lambda: [200])
     timeout: timedelta = field(default_factory=lambda: timedelta(minutes=2))
     retry_attempts: int = 3
     retry_interval: timedelta = field(default_factory=lambda: timedelta(seconds=15))
     metrics_check: MetricsCheck = field(default_factory=MetricsCheck)
+    kv_offload_fs_path: str = "/mnt/kv-cache-0"
+    kv_offload_fs_min_bytes: int = 1048576  # 1M
     multi_pool: MultiPoolCheck | None = None
     benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
 

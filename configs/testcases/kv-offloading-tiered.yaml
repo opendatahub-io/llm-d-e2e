@@ -1,0 +1,43 @@
+name: kv-offloading-tiered
+description: "KV-cache offloading tiered to filesystem (CPU + secondary FS, lru eviction)"
+model:
+  name: Qwen/Qwen3-0.6B
+  uri: hf://Qwen/Qwen3-0.6B
+  displayName: qwen3-0.6b-kv-offloading-tiered
+  category: kv-cache-offloading
+  cache:
+    enabled: true
+    storageSize: 10Gi
+    keepPVC: true
+    timeout: 15m
+deployment:
+  manifestPath: kv-offloading-tiered.yaml
+  replicas: 1
+  requiresGpu: true
+  readyTimeout: 10m
+  resources:
+    cpu: "4"
+    memory: 32Gi
+    gpus: 1
+    rdma: false
+validation:
+  healthEndpoint: /health
+  healthPort: 8000
+  healthScheme: HTTPS
+  inferenceCheck: true
+  testPrompts:
+    - "Why we need kv-cache offloading for make llm-d better on openshift?"
+  # Repeat the prompt many times (unique per iteration) to fill the KV cache so it spills to the FS tier.
+  inferenceRepeat: 100
+  expectedCodes: [200]
+  timeout: 2m
+  retryAttempts: 3
+  retryInterval: 15s
+  metricsCheck:
+    enabled: true
+    checkVLLM: true
+    checkScheduler: true
+    checkKvcacheOffloading: true
+    checkKvcacheOffloadingFs: true
+  kvOffloadFsPath: /mnt/kv-cache-0  # create by kserve in format /mnt/kv-cache-<nr>, we can remove this once enable new metrics
+cleanup: true

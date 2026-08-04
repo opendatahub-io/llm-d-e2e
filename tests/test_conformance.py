@@ -39,6 +39,8 @@ from conformance.metrics import (
     dump_raw_metrics,
     validate_cache_aware,
     validate_flow_control,
+    validate_kvcache_offloading_cpu,
+    validate_kvcache_offloading_fs,
     validate_lora,
     validate_pd,
     validate_scheduler,
@@ -200,6 +202,11 @@ class TestConformance:
             assert tokens > 0, f"No tokens generated for {label}"
 
         plain_prompts = tc.validation.test_prompts or ["What is 2+2?"]
+        repeat = max(1, tc.validation.inference_repeat)
+        if repeat > 1:
+            # Unique prefix per iteration so prefix-caching wont work
+            plain_prompts = [f"({i}) {p}" for i in range(repeat) for p in plain_prompts]
+            _log(f"Repeating prompts x{repeat} → {len(plain_prompts)} requests")
 
         if tc.validation.chat_prompts:
             for entry in tc.validation.chat_prompts:
@@ -346,6 +353,38 @@ class TestConformance:
             _log(f"  {c.name}: {'PASS' if c.passed else 'FAIL'} — {c.message}")
         failed = [c for c in checks if not c.passed]
         assert not failed, f"LoRA metric checks failed: {[c.message for c in failed]}"
+
+    def test_16_metrics_kvcache_offloading(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
+        """KV-cache offloading metrics should show bytes offloaded on vLLM pods."""
+        _require_deployed(deployer, tc, test_mode)
+        mc = tc.validation.metrics_check
+        if not mc.enabled or not mc.check_kvcache_offloading:
+            pytest.skip("KV-cache offloading metrics check disabled")
+        _log("Scraping KV-cache offloading metrics from vLLM pods...")
+        vllm = scraper.scrape_vllm(tc.name)
+        _log(f"Scraped {len(vllm)} pod(s)")
+        assert vllm, "No vLLM metrics scraped"
+        checks = validate_kvcache_offloading_cpu(vllm)
+        for c in checks:
+            _log(f"  {c.name}: {'PASS' if c.passed else 'FAIL'} — {c.message}")
+        failed = [c for c in checks if not c.passed]
+        assert not failed, f"KV-cache offloading metric checks failed: {[c.message for c in failed]}"
+
+    def test_17_kvcache_offloading_fs(self, deployer: Deployer, tc: TestCase, test_mode: str):
+        _require_deployed(deployer, tc, test_mode)
+        mc = tc.validation.metrics_check
+        if not mc.enabled or not mc.check_kvcache_offloading_fs:
+            pytest.skip("KV-cache filesystem offloading check disabled")
+        path = tc.validation.kv_offload_fs_path
+        pods = deployer.list_workload_pods(tc.name)
+        assert pods, f"No workload pods found for '{tc.name}'"
+        _log(f"Checking FS offload disk usage under {path} on {len(pods)} pod(s)...")
+        usage_by_pod = {pod: deployer.pod_disk_usage(pod, path) for pod in pods}
+        checks = validate_kvcache_offloading_fs(usage_by_pod, path, tc.validation.kv_offload_fs_min_bytes)
+        for c in checks:
+            _log(f"  {c.name}: {'PASS' if c.passed else 'FAIL'} — {c.message}")
+        failed = [c for c in checks if not c.passed]
+        assert not failed, f"KV-cache FS offload checks failed: {[c.message for c in failed]}"
 
     def test_20_benchmark(self, deployer: Deployer, tc: TestCase, test_mode: str, guidellm_image: str):
         """Run GuideLLM benchmark and check performance thresholds."""

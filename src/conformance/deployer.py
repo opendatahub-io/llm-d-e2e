@@ -156,6 +156,53 @@ class Deployer:
         self._gpu_count = total
         return total
 
+    def list_workload_pods(self, name: str) -> list[str]:
+        """Return all workload pod names for an LLMInferenceService."""
+        label = WORKLOAD_LABEL.format(name=name)
+        output = self.kubectl(
+            "get",
+            "pods",
+            "-n",
+            self.namespace,
+            "-l",
+            label,
+            "-o",
+            "jsonpath={range .items[*]}{.metadata.name}{'\\n'}{end}",
+            check=False,
+        )
+        return [line.strip() for line in output.splitlines() if line.strip()]
+
+    def _container_with_mount(self, pod: str, path: str) -> str | None:
+        out = self.kubectl("get", "pod", pod, "-n", self.namespace, "-o", "json", check=False)
+        if not out:
+            return None
+        try:
+            containers = json.loads(out)["spec"]["containers"]
+        except (KeyError, ValueError):
+            return None
+        best, best_len = None, -1
+        for c in containers:
+            for m in c.get("volumeMounts", []):
+                mp = m.get("mountPath", "").rstrip("/")
+                if mp and (path == mp or path.startswith(mp + "/")) and len(mp) > best_len:
+                    best, best_len = c.get("name"), len(mp)
+        return best
+
+    def pod_disk_usage(self, pod: str, path: str) -> int | None:
+        args = ["exec", pod, "-n", self.namespace]
+        container = self._container_with_mount(pod, path)
+        if container:
+            args += ["-c", container]
+        args += ["--", "du", "-sk", path]
+        out = self.kubectl(*args, check=False)
+        if not out:
+            return None
+        first = out.split()[0]
+        try:
+            return int(first) * 1024
+        except ValueError:
+            return None
+
     def ensure_namespace(self):
         try:
             self.kubectl("get", "namespace", self.namespace, check=True)
