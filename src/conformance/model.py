@@ -1,4 +1,14 @@
-"""Model downloading and PVC caching for test cases."""
+"""HuggingFace model download into a PVC for pre-cached test runs.
+
+Used when ``--model-source pvc`` or ``--mode cache``. ``ModelDownloader``
+creates a PVC (optional ``storageClass`` / size override) and a Job that
+runs ``huggingface-cli download`` into ``/models``. If ``cache.keepPVC``
+is true and the PVC already exists, the download is skipped.
+
+``pvc_uri()`` returns ``pvc://<name>/models`` so the deployer can rewrite
+the LLMInferenceService model URI from ``hf://`` to the cached PVC.
+``CacheResult.status`` is one of: ready, downloading, failed, not_found.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,12 @@
-"""JSON test report generation."""
+"""JSON conformance report written at session end.
+
+Session-scoped ``report`` fixture constructs ``Report`` with profile/platform;
+``finalize(--report-dir)`` writes ``report-<timestamp>.json`` including:
+  - suite metadata and ``manifests`` from ``deploy/manifests/.manifest-ref``
+    (branch, repo, commit, date — via ``load_manifest_ref``)
+  - per-case ``TestResult`` rows (pass/fail/skip, duration, error, model)
+  - summary counts (total / passed / failed / skipped)
+"""
 
 from __future__ import annotations
 

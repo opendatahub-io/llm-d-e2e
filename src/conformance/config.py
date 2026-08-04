@@ -1,4 +1,24 @@
-"""Configuration types and YAML loaders for test cases and profiles."""
+"""Test case / profile dataclasses and YAML loaders.
+
+YAML uses camelCase keys; Python fields are snake_case. ``_build()`` bridges
+the two recursively. Duration fields named ``timeout``, ``ready_timeout``, or
+``retry_interval`` accept strings like ``15m``, ``2h``, ``300s``, ``1h30m``.
+
+Hierarchy (``configs/testcases/*.yaml`` → ``TestCase``):
+  - ``model`` — name/URI, optional ``cache``, optional ``lora`` (adapters,
+    maxRank, maxAdapters)
+  - ``deployment`` — manifestPath, replicas, resources, parallelism,
+    prefill, worker, networkAttach, envOverrides, readyTimeout
+  - ``validation`` — health, prompts / chatPrompts, metricsCheck flags
+    (vLLM, cache, P/D, scheduler, flow control, NIXL, LoRA), benchmark
+  - ``cleanup`` — whether phase 99 deletes resources
+
+Profiles (``configs/profiles/*.yaml`` → ``TestProfile``) list test case
+names; ``resolve_profile`` / ``filter_by_names`` / ``load_testcases_from_dir``
+select which cases run. Directory loaders use ``iter_config_yamls`` (``.yaml`` /
+``.yml`` only; skips ``README*`` so docs beside configs are ignored).
+``chat_prompt_to_messages`` turns chatPrompts YAML entries into OpenAI message lists.
+"""
 
 from __future__ import annotations
 
@@ -243,6 +263,21 @@ def _build(cls, data: dict | None):
     return cls(**kwargs)
 
 
+def iter_config_yamls(directory: str | Path) -> list[Path]:
+    """Return config YAML paths under *directory*, excluding docs like README.md.
+
+    Only ``*.yaml`` / ``*.yml`` files are considered. Names starting with
+    ``README`` (any case) are skipped so documentation next to configs is safe.
+    """
+    directory = Path(directory)
+    if not directory.is_dir():
+        return []
+    files: list[Path] = []
+    for pattern in ("*.yaml", "*.yml"):
+        files.extend(directory.glob(pattern))
+    return sorted(f for f in files if f.is_file() and not f.name.upper().startswith("README"))
+
+
 def load_testcase(path: str | Path) -> TestCase:
     with open(path) as f:
         data = yaml.safe_load(f)
@@ -266,11 +301,11 @@ def load_profile(path: str | Path) -> TestProfile:
 
 
 def load_testcases_from_dir(directory: str | Path) -> list[TestCase]:
-    directory = Path(directory)
-    cases = []
-    for f in sorted(directory.glob("*.yaml")):
-        cases.append(load_testcase(f))
-    return cases
+    return [load_testcase(f) for f in iter_config_yamls(directory)]
+
+
+def load_profiles_from_dir(directory: str | Path) -> list[TestProfile]:
+    return [load_profile(f) for f in iter_config_yamls(directory)]
 
 
 def resolve_profile(profile: TestProfile, testcase_dir: str | Path) -> list[TestCase]:

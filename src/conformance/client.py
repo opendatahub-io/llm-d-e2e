@@ -1,4 +1,17 @@
-"""OpenAI-compatible HTTP client for vLLM inference endpoints."""
+"""OpenAI-compatible HTTP client for vLLM endpoints (httpx).
+
+``LLMClient`` talks to ``/health``, ``/v1/models``, ``/v1/completions``, and
+``/v1/chat/completions``. Optional bearer token; TLS verify disabled for
+self-signed pod certs.
+
+In conformance tests, two instances are used:
+  - Gateway base URL (``client`` fixture) — inference only; EPP routes these
+  - Direct pod base URL (``pod_client`` fixture) — health and model list
+
+``chat()`` accepts a plain string (wrapped as a user message) or a list of
+OpenAI message dicts (e.g. from ``chat_prompt_to_messages`` / LoRA adapter
+model names).
+"""
 
 from __future__ import annotations
 
@@ -6,7 +19,7 @@ import httpx
 
 
 class LLMClient:
-    """Client for health checks, model listing, and inference against vLLM."""
+    """Health, model list, completions, and chat against an OpenAI-compatible base URL."""
 
     def __init__(self, base_url: str, bearer_token: str = "", timeout: float = 120):
         headers = {}

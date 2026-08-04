@@ -18,7 +18,7 @@ End-to-end conformance test suite for [llm-d](https://github.com/llm-d) / KServe
 ```bash
 uv sync                                              # install dependencies
 uv run llm-d-e2e --setup main                        # clone test manifests (latest)
-uv run llm-d-e2e --setup 3.4-stable                  # clone manifests (specific branch)
+uv run llm-d-e2e --setup 3.5-GA                      # clone manifests (specific branch)
 
 uv run pytest tests/test_smoke.py -v                  # unit tests (no cluster needed)
 uv run ruff check src/ tests/                         # lint
@@ -30,25 +30,12 @@ uv run llm-d-e2e -t single-gpu --mock                 # simulate vLLM (no GPU)
 uv run llm-d-e2e -t single-gpu --mode discover --endpoint http://svc:8000  # validate existing deployment
 uv run llm-d-e2e -t single-gpu --mode cache           # pre-cache model into PVC then exit
 uv run llm-d-e2e -p configs/profiles/smoke.yaml       # run a profile
+uv run llm-d-e2e -p configs/profiles/3.5.yaml         # run version-specific conformance profile
 uv run llm-d-e2e -t single-gpu --nocleanup            # keep resources after test
 uv run llm-d-e2e -t single-gpu --html report.html     # generate HTML report
 uv run llm-d-e2e -t single-gpu -x                     # stop on first failure
 uv run llm-d-e2e --list-testcases                     # list available test cases
 uv run llm-d-e2e --list-profiles                      # list available profiles
-
-# Auth / platform
-uv run llm-d-e2e -t single-gpu --platform ocp --pull-secret my-secret --bearer-token $TOKEN
-uv run llm-d-e2e -t single-gpu --disable-auth         # strip WASM auth annotation from manifest
-
-# Storage / model caching
-uv run llm-d-e2e -t single-gpu --model-source pvc --storage-class my-sc --storage-size 50Gi
-
-# Benchmark
-uv run llm-d-e2e -t pd-performance --guidellm-image ghcr.io/vllm-project/guidellm:v0.6.0
-
-# P/D node placement
-uv run llm-d-e2e -t pd --decode-node-selector kubernetes.io/hostname=gpu-node-1
-uv run llm-d-e2e -t pd --prefill-node-selector kubernetes.io/hostname=gpu-node-2
 
 # Run a single conformance phase (by method name prefix)
 uv run pytest tests/test_conformance.py -k "test_09_inference" --testcase single-gpu
@@ -71,71 +58,107 @@ Makefile targets mirror CLI: `make test TESTCASE=single-gpu`, `make unittest`, `
 The `--mode` flag controls which phases execute:
 - **`deploy`** (default) — full lifecycle: deploy → validate → cleanup.
 - **`discover`** — skip deploy/cleanup, validate an existing deployment (requires `--endpoint` or auto-detected). Phases call `_require_deployed()` which returns early in discover mode.
-- **`cache`** — run only the model download phase (create PVC + download Job), then exit. Used to pre-warm a PVC before a real test run.
+- **`cache`** — run only the model download phase (create PVC + download Job), then exit.
 
 ### Ordered conformance phases
 
-`test_conformance.py:TestConformance` uses numeric method name prefixes (`test_01_` through `test_99_`) for phase ordering: prereq → deploy → service → gateway → pods → ready → health → models → inference → metrics (4 variants) → benchmark → post-benchmark metrics → cleanup. Phases skip themselves based on `tc` config flags or `--mode discover`.
+`test_conformance.py:TestConformance` uses numeric method name prefixes (`test_01_` through `test_99_`) for phase ordering:
 
-**Skip propagation**: Two helpers control cascading skips across phases:
-- `_require_manifest(tc)` — skips the phase if the manifest file doesn't exist for the current branch (prevents deploy attempts with missing manifests).
-- `_require_deployed(deployer, tc, test_mode)` — skips the phase if deploy failed or was skipped (prevents post-deploy phases from running against nothing). In discover mode, this check is bypassed.
+| Phase | Method | What it validates |
+|-------|--------|-------------------|
+| 01 | `test_01_prereq` | CRD exists, manifest present |
+| 02 | `test_02_deploy` | Apply LLMInferenceService manifest |
+| 03 | `test_03_service` | Service creation |
+| 04 | `test_04_gateway` | Gateway programmed with address |
+| 05 | `test_05_pods` | Pods running without crashes |
+| 06 | `test_06_ready` | LLMInferenceService Ready=True |
+| 07 | `test_07_health` | GET /health (direct pod, bypasses EPP) |
+| 08 | `test_08_models` | GET /v1/models (direct pod, + LoRA adapters if configured) |
+| 09 | `test_09_inference` | Chat completions + completions (+ LoRA adapter inference) |
+| 10 | `test_10_metrics_vllm` | Basic vLLM request success metrics |
+| 11 | `test_11_metrics_cache` | Prefix KV cache hit metrics |
+| 12 | `test_12_metrics_pd` | P/D token distribution + NIXL transfer metrics |
+| 13 | `test_13_metrics_scheduler` | EPP/scheduler processed request metrics |
+| 14 | `test_14_metrics_flow_control` | Flow control dispatch activity metrics |
+| 15 | `test_15_metrics_lora` | LoRA adapter state metrics (`vllm:lora_requests_info`) |
+| 20 | `test_20_benchmark` | GuideLLM benchmark with performance thresholds |
+| 21 | `test_21_metrics_post_benchmark` | P/D metrics after benchmark load |
+| 99 | `test_99_cleanup` | Delete LLMInferenceService |
 
-**CrashLoopBackOff early detection**: `wait_for_pods()` and `wait_for_ready()` poll for CrashLoopBackOff every 15s. After 3 consecutive detections (~45s), the deploy is failed immediately instead of waiting the full timeout (which can be 30+ minutes).
+Phases skip themselves based on `tc` config flags or `--mode discover`.
 
-**Persistent controller error fast-fail**: `wait_for_ready()` also polls the `Ready` condition's `reason` and `message` fields. If the same reason+message pair persists across 3 consecutive polls, it raises `RuntimeError` immediately with the reason and message (avoiding the full timeout wait). If the reason keeps changing between polls, that indicates the controller is making progress and the poll continues normally.
+### Skip propagation
 
-**Operator image pull detection**: Both `test_01_prereq` (CRD not found) and `wait_for_ready()` (persistent error and timeout paths) call `_check_operator_image_issues()`, which scans pods in `OPERATOR_NAMESPACES` (`redhat-ods-applications`, `redhat-ods-operator`, `rhaii`) for `ImagePullBackOff`/`ErrImagePull` states. If found, the failing image name is appended to the error so the root cause is immediately visible.
+Two helpers control cascading skips across phases:
+- `_require_manifest(tc)` — skips if the manifest file doesn't exist for the current branch.
+- `_require_deployed(deployer, tc, test_mode)` — skips if deploy failed or was skipped. In discover mode, this check is bypassed.
+
+### Fast-fail behaviors
+
+- **CrashLoopBackOff**: `wait_for_pods()` and `wait_for_ready()` poll every 15s. After 3 consecutive detections (~45s), the deploy fails immediately instead of waiting the full timeout (30+ minutes).
+- **Persistent controller error**: `wait_for_ready()` polls the `Ready` condition's `reason` and `message`. If the same reason+message pair persists across 3 consecutive polls, it raises immediately. Changing reason/message indicates controller progress and polling continues.
+- **Operator image pull detection**: Both `test_01_prereq` and `wait_for_ready()` call `_check_operator_image_issues()`, scanning pods in `OPERATOR_NAMESPACES` for `ImagePullBackOff`/`ErrImagePull` states.
 
 ### Webhook and CRD transient error retry
 
-`deployer.py:_apply_with_webhook_retry()` wraps `kubectl apply` with retry logic for errors that are transient at deploy/upgrade time:
-- Webhook not ready yet (`failed calling webhook`, `no endpoints available for service`)
-- CRD not found due to stale API discovery (`the server could not find the requested resource`, `no matches for kind`)
+`deployer.py:_apply_with_webhook_retry()` wraps `kubectl apply` with retry logic for transient post-upgrade errors (webhook not ready, CRD not registered). Non-transient errors (bad fields, RBAC) are re-raised immediately.
 
-Non-webhook errors (bad manifest fields, RBAC, etc.) are re-raised immediately without retry. Retries continue until the grace period expires, then raise with a "waiting for webhook" message.
+### Endpoint routing (gateway vs pod)
+
+Health and models endpoints return 503 through the Gateway API + EPP because EPP only handles inference. The suite uses two separate port-forwards:
+- **Gateway** (`client` fixture): `svc/inference-gateway-istio:80` in `redhat-ods-applications` — for `/v1/chat/completions`. HTTP.
+- **Pod** (`pod_client` fixture): `workload-pod:8000` in the test namespace — for `/health` and `/v1/models`. HTTPS (self-signed).
+
+The gateway service name and namespace are RHOAI-specific hardcoded values in `deployer.py:_ensure_port_forward()`.
 
 ### Fixture scoping
 
-- **Session-scoped**: `deployer` (one kubectl wrapper per run), `report` (finalized at session end)
-- **Class-scoped**: `endpoint` (gateway port-forward), `client` (for inference), `pod_endpoint` (direct pod port-forward), `pod_client` (for health/models), `scraper`
+- **Session-scoped**: `deployer`, `report`, `no_cleanup`, `test_mode`, `mock_mode`, `guidellm_image`
+- **Class-scoped**: `endpoint`, `client`, `pod_endpoint`, `pod_client`, `scraper`
 
 ### Source modules (`src/conformance/`)
 
 - **config.py** — Dataclass config types and YAML loaders. YAML keys are camelCase, Python fields are snake_case; `_build()` handles recursive conversion.
-- **deployer.py** — `Deployer`: manages LLMInferenceService lifecycle via `kubectl` subprocess calls. Handles deploy, wait-for-ready, port-forwarding (gateway and direct pod), manifest patching (mock image, pull secrets, auth disable), EPP metrics RBAC setup/teardown, pull secret propagation between namespaces, gateway namespace allowance patching, and cleanup. All cluster interaction is subprocess `kubectl` — no Python K8s client.
+- **deployer.py** — `Deployer`: manages LLMInferenceService lifecycle via `kubectl` subprocess calls. Handles deploy, wait-for-ready, port-forwarding, manifest patching (mock image, pull secrets, auth disable, LoRA spec injection, node selectors, env overrides), EPP metrics RBAC, pull secret propagation, gateway namespace allowance, and cleanup.
 - **client.py** — `LLMClient`: OpenAI-compatible HTTP client (httpx) for `/health`, `/v1/models`, `/v1/completions`, `/v1/chat/completions`.
-- **metrics.py** — `Scraper`: scrapes Prometheus metrics from pods via `kubectl exec` (python3/wget), falling back to port-forward + httpx for containers without those tools (simulator, distroless). Supports bearer token auth for EPP metrics (`--metrics-endpoint-auth=true`). `parse_prometheus()` parses text exposition format. Per-topology validators: `validate_vllm_basic`, `validate_cache_aware`, `validate_pd`, `validate_scheduler`.
+- **metrics.py** — `Scraper`: scrapes Prometheus metrics from pods via `kubectl exec` (python3/wget), falling back to port-forward + httpx for minimal containers. Per-topology validators: `validate_vllm_basic`, `validate_cache_aware`, `validate_pd`, `validate_scheduler`, `validate_flow_control`, `validate_lora`. `parse_prometheus()` parses text exposition format.
 - **model.py** — `ModelDownloader`: creates PVCs and download Jobs for pre-caching models from HuggingFace.
 - **report.py** — JSON report generation with pass/fail/skip summary.
-- **benchmark.py** — `run_benchmark()`: creates a GuideLLM K8s Job, waits for completion, parses JSON results (output tokens/s, TTFT/ITL median+p95, request counts). Results delimited by `---GUIDELLM_JSON_START---` marker in pod logs.
+- **benchmark.py** — `run_benchmark()`: creates a GuideLLM K8s Job, parses JSON results delimited by `---GUIDELLM_JSON_START---` marker.
 
-### Model caching (`--model-source pvc` / `--mode cache`)
+### Metrics validation topology
 
-`model.py:ModelDownloader` creates a PVC and a K8s Job that downloads a HuggingFace model into it. When `--model-source pvc` is set, `deployer.py` switches the model URI from `hf://` to `pvc://` and patches the manifest accordingly. The PVC can be retained across runs (`cache.keepPVC: true` in test case YAML) to avoid re-downloading.
+| Validator | Scrape target | Phase | Topology | Gate flag |
+|-----------|--------------|-------|----------|-----------|
+| `validate_vllm_basic` | workload pods | test_10 | All | `checkVLLM` |
+| `validate_cache_aware` | workload + EPP | test_11 | Prefix KV cache | `checkPrefixCache` |
+| `validate_pd` | workload + prefill | test_12 | P/D disaggregation | `checkPD` |
+| `validate_scheduler` | EPP pods | test_13 | Scheduler/EPP | `checkScheduler` |
+| `validate_flow_control` | EPP pods | test_14 | Flow control | `checkFlowControl` |
+| `validate_lora` | workload pods | test_15 | LoRA adapters | `checkLora` |
 
-`--mode cache` runs only the model download phase and exits — useful for pre-warming the PVC before a test run.
+`MetricsCheck.check_nixl` exists in the dataclass but has no validator method yet.
 
-### Config files
+EPP pod discovery tries multiple label patterns (`EPP_LABELS` list in `metrics.py`) because the component label varies across llm-d versions.
 
-- **configs/testcases/*.yaml** — Each file maps to one `TestCase` dataclass. Contains model info, deployment spec (manifest path, replicas, resources, timeouts), validation criteria (prompts, retry config), and metrics check flags.
-- **configs/profiles/*.yaml** — Named groups of test case names (e.g., `smoke`, `all`, `pd`).
-- **deploy/manifests/*.yaml** — LLMInferenceService manifests, cloned from [llm-d-conformance-manifests](https://github.com/aneeshkp/llm-d-conformance-manifests) via `--setup`. Gitignored.
-- **deploy/manifests/.manifest-ref** — YAML file tracking the active manifest branch, repo URL, commit SHA, and clone timestamp. Written by `--setup` / `make setup`, read by `report.py` to include manifest provenance in test reports. `--setup` prunes stale YAML files before copying new ones — switching branches removes files that don't exist in the new branch.
+### EPP metrics auth
 
-### vLLM Simulator (`--mock`)
+The EPP's `--metrics-endpoint-auth=true` flag (default in RHOAI 3.5+) requires bearer token auth to scrape `/metrics` on port 9090. `Deployer.ensure_metrics_rbac()` creates a `ClusterRoleBinding` granting the EPP's service account access to `kserve-metrics-reader-cluster-role`. The scraper generates a token via `kubectl create token`.
 
-The `--mock` flag replaces the vLLM container with [llm-d-inference-sim](https://github.com/llm-d/llm-d-inference-sim) (`ghcr.io/llm-d/llm-d-inference-sim:latest`), a Go-based simulator with OpenAI-compatible endpoints, vLLM-compatible Prometheus metrics, configurable latency, and KV cache simulation. When `--mock` is used, `deployer.py:_replace_vllm_image()` patches the manifest to: swap the container image, inject simulator args (`--model`, `--port`, `--self-signed-certs`, `--mode random`, `--enable-kvcache true`), and strip GPU resource requests. A custom image can be passed: `--mock my-image:v1`.
+## Adding a New CLI Flag
 
-The `--render-image` flag injects a vLLM CPU sidecar for tokenizer rendering alongside the simulator (requires vLLM ≥ 0.19 `vllm launch render`). If not specified, defaults to `vllm/vllm-openai-cpu:v0.19.1`.
+1. Add `parser.add_argument()` in `cli.py:main()`.
+2. Add matching `parser.addoption()` in `conftest.py:pytest_addoption()`.
+3. Add the mapping in `cli.py:flag_map` dict (or handle boolean flags separately after the `flag_map` loop).
+4. Access via `request.config.getoption("--flag-name")` in fixtures or test methods.
 
 ## Adding a New Test Case
 
-Use `scripts/new-testcase.sh <name>` to generate a YAML config + manifest stub, then customize:
+Use `scripts/new-testcase.sh <name>` to generate stubs, then customize:
 
 1. Create `configs/testcases/<name>.yaml` using camelCase keys matching the `TestCase` dataclass hierarchy in `config.py`.
-2. Add the corresponding LLMInferenceService manifest to the manifest repo (or `deploy/manifests/` for local testing). Set `deployment.manifestPath` in the YAML to the filename.
-3. Enable the appropriate `metricsCheck` flags (`checkVLLM`, `checkScheduler`, `checkPrefixCache`, `checkPD`) based on the deployment topology.
+2. Add the corresponding manifest to the manifest repo (or `deploy/manifests/` for local testing). Set `deployment.manifestPath` to the filename.
+3. Enable the appropriate `metricsCheck` flags based on the deployment topology.
 4. Add the test case name to relevant profiles in `configs/profiles/*.yaml`.
 
 ## Adding a New Config Field
@@ -143,51 +166,21 @@ Use `scripts/new-testcase.sh <name>` to generate a YAML config + manifest stub, 
 1. Add the dataclass field in `config.py` (snake_case).
 2. If it's a new nested type, add a `_build()` branch for it (matching on the type name string in hints).
 3. Use camelCase for the key in YAML files.
-4. Duration fields (named `timeout`, `ready_timeout`, `retry_interval`) are auto-parsed from strings like `"15m"`, `"2h"`, `"300s"`.
-
-Existing `DeployConfig` fields that affect manifest patching but are less obvious:
-- `env_overrides: dict[str,str]` — injects extra env vars into the manifest's main container.
-- `network_attach: str` — adds a network attachment annotation (for SR-IOV / RDMA NICs).
-- `worker: bool` — signals the manifest uses a worker topology.
+4. Duration fields (`timeout`, `ready_timeout`, `retry_interval`) are auto-parsed from strings like `"15m"`, `"2h"`, `"300s"`.
 
 ## Adding a New Conformance Phase
 
 1. Add a method `test_NN_<name>` to `TestConformance` in `test_conformance.py`. Pick a number between existing phases.
-2. Use `pytest.skip()` for conditions where the phase doesn't apply (e.g., discover mode, disabled config flag).
-3. Phases receive fixtures via parameter names: `deployer`, `tc`, `client`, `endpoint`, `scraper`, `test_mode`, `no_cleanup`.
+2. Use `pytest.skip()` for conditions where the phase doesn't apply.
+3. Phases receive fixtures via parameter names: `deployer`, `tc`, `client`, `endpoint`, `scraper`, `test_mode`, `no_cleanup`, `request`.
 
-## Metrics Validation Topology
+## Adding a New Metrics Validator
 
-Each metrics validator in `metrics.py` targets a specific deployment topology:
-
-| Validator               | Scrape target      | Test phase | Topology           |
-|------------------------|--------------------|------------|--------------------|
-| `validate_vllm_basic`  | workload pods      | test_10    | All (basic check)  |
-| `validate_cache_aware` | workload + EPP     | test_11    | Prefix KV cache    |
-| `validate_pd`          | workload + prefill | test_12    | P/D disaggregation |
-| `validate_scheduler`   | EPP pods           | test_13    | Scheduler/EPP      |
-| `validate_flow_control`| EPP pods           | test_14    | Flow control       |
-| `validate_pd` (post)   | workload + prefill | test_21    | P/D after benchmark|
-
-`MetricsCheck.check_nixl` exists in the dataclass for NIXL KV transfer metrics (`nixl:kv_transfer_count_total`) but has no validator method yet — add one in `metrics.py` and wire it up in `test_conformance.py`.
-
-EPP pod discovery tries multiple label patterns (`EPP_LABELS` list in `metrics.py`) because the component label varies across llm-d versions.
-
-### Endpoint routing (gateway vs pod)
-
-Health (`/health`) and models (`/v1/models`) endpoints return 503 when routed through the Gateway API + EPP because the EPP only handles inference requests. The test suite uses two separate port-forwards:
-- **Gateway** (`client` fixture): `localhost → svc/inference-gateway-istio:80` in namespace `redhat-ods-applications` — for `/v1/chat/completions` (test_09). HTTP.
-- **Pod** (`pod_client` fixture): `localhost → workload-pod:8000` in the test namespace — for `/health` (test_07) and `/v1/models` (test_08). HTTPS (self-signed).
-
-The gateway service name (`inference-gateway-istio`) and its namespace (`redhat-ods-applications`) are hardcoded in `deployer.py:_ensure_port_forward()`. These are RHOAI-specific values; clusters running upstream KServe with a different gateway name will need these changed.
-
-During deploy, `deployer.py:ensure_gateway_allows_namespace()` patches the `inference-gateway` Gateway resource in `redhat-ods-applications` to set `allowedRoutes.namespaces.from: All` if it isn't already, so the test namespace's HTTPRoutes are accepted.
-
-### EPP metrics auth
-
-The EPP's `--metrics-endpoint-auth=true` flag (default in RHOAI 3.5+) requires bearer token auth to scrape `/metrics` on port 9090. During deploy, `Deployer.ensure_metrics_rbac()` creates a `ClusterRoleBinding` granting the EPP's service account access to `kserve-metrics-reader-cluster-role`. The scraper generates a token via `kubectl create token` and passes it as a bearer header. The binding is cleaned up during `Deployer.cleanup()`.
-
-EPP pod discovery uses multiple label patterns (`EPP_LABELS` in `metrics.py`) because the component label varies across llm-d versions. Current pattern: `app.kubernetes.io/component=llminferenceservice-router-scheduler`.
+1. Define metric constants at the top of `metrics.py`.
+2. Add a `validate_<topology>(results) -> list[CheckResult]` function.
+3. Add a `check_<flag>: bool` field to `MetricsCheck` in `config.py`.
+4. Wire it up in `test_conformance.py` as a new `test_NN_metrics_<name>` method gated by the new flag.
+5. Import the validator in `test_conformance.py`.
 
 ## Key Design Decisions
 
@@ -198,22 +191,24 @@ EPP pod discovery uses multiple label patterns (`EPP_LABELS` in `metrics.py`) be
 - Health/models go directly to pods; inference goes through the gateway — the EPP only routes inference requests.
 - Metrics scraping tries `kubectl exec` first (python3, wget), falls back to port-forward + httpx for minimal container images.
 - Global pytest timeout is 21600s (6 hours) to accommodate slow model downloads and pod startup.
-- Pull secrets are automatically propagated from operator namespaces (`rhaii`, `redhat-ods-applications`, `default`) into the test namespace when `--pull-secret` is specified.
 
-## Container Image
+## Config files
 
-Available at `quay.io/aneeshkp/llm-d-e2e`. The `Dockerfile` bakes in manifests at build time (`--build-arg MANIFEST_REF=<branch>`), defaults to `main`. At runtime, `--setup <branch>` replaces the baked-in manifests. Entrypoint is `uv run llm-d-e2e`.
+- **configs/testcases/*.yaml** — Each file maps to one `TestCase` dataclass. Contains model info (including LoRA adapters), deployment spec, validation criteria, and metrics check flags.
+- **configs/profiles/*.yaml** — Named groups of test case names. Includes version-specific profiles (`3.4.yaml`, `3.5.yaml`, `3.5-gpu.yaml`) and topology profiles (`smoke`, `pd`, `cache-aware`, `flow-control`, `lora`).
+- **deploy/manifests/*.yaml** — LLMInferenceService manifests, cloned from the manifest repo via `--setup`. Gitignored.
+- **deploy/manifests/.manifest-ref** — Tracks the active manifest branch, repo URL, commit SHA, and clone timestamp.
 
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yaml`) runs on push/PR to `main`:
-1. **lint-and-format** — `ruff check` + `ruff format --check` on `src/` and `tests/`
-2. **smoke-tests** — clones manifests (`--setup main`), runs `pytest tests/test_smoke.py` (no cluster required)
+1. **lint-and-format** — `ruff check` + `ruff format --check`
+2. **smoke-tests** — clones manifests, runs `pytest tests/test_smoke.py`
 
 No cluster integration tests run in CI.
 
 ## Code Style
 
 - Ruff for linting and formatting, line length 120, target Python 3.11.
-- Uses `from __future__ import annotations` throughout for PEP 604 union syntax.
+- Uses `from __future__ import annotations` throughout.
 - Config types are plain dataclasses (no Pydantic).

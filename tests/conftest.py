@@ -1,4 +1,32 @@
-"""Pytest fixtures and CLI flags for llm-d conformance tests."""
+"""Pytest fixtures and CLI flags for llm-d conformance tests.
+
+CLI flags here must stay in sync with ``cli.py`` (``flag_map`` + boolean
+flags). ``cli.py:main()`` translates user flags into pytest ``-o`` options
+and runs ``tests/test_conformance.py``.
+
+Test case selection (``pytest_generate_tests``):
+  - ``--profile`` — load a profile YAML and resolve its test case names
+  - ``--testcase`` — comma-separated names from ``--testcase-dir``
+  - neither — run every YAML under ``--testcase-dir``
+  Parametrizes the class-scoped ``tc`` fixture (one ``TestCase`` per case).
+
+Session-scoped fixtures:
+  - ``deployer`` — kubectl wrapper; stops port-forwards at session end
+  - ``report`` — JSON report; finalized into ``--report-dir``
+  - ``no_cleanup`` / ``test_mode`` / ``mock_mode`` / ``guidellm_image`` —
+    thin accessors for ``--nocleanup``, ``--mode``, ``--mock``,
+    ``--guidellm-image``
+
+Class-scoped fixtures (per ``tc``):
+  - ``endpoint`` / ``client`` — gateway port-forward (inference)
+  - ``pod_endpoint`` / ``pod_client`` — direct pod port-forward
+    (health + ``/v1/models``; EPP only routes inference)
+  - ``scraper`` — Prometheus metrics via kubectl exec / port-forward
+
+Notable options: ``--mode`` (deploy|discover|cache), ``--mock``,
+``--model-source``, ``--render-image``, auth/pull-secret, PVC storage,
+P/D node selectors, GuideLLM image override.
+"""
 
 from __future__ import annotations
 

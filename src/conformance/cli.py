@@ -1,4 +1,23 @@
-"""CLI entry point for llm-d-e2e conformance tests."""
+"""CLI entry point (``llm-d-e2e``) — translates flags to pytest and runs phases.
+
+``main()`` parses argparse options, handles utility commands, then builds a
+pytest argv for ``tests/test_conformance.py``. Every value flag in
+``flag_map`` must have a matching ``pytest_addoption`` in ``conftest.py``;
+boolean flags (``--disable-auth``, ``--nocleanup``) are appended separately.
+
+Utility commands (may exit before pytest):
+  - ``--list-testcases`` / ``--list-profiles`` — print configs + manifest ref
+  - ``--setup [REF]`` — clone ``llm-d-conformance-manifests``, prune stale
+    YAML, write ``deploy/manifests/.manifest-ref``; interactive branch pick
+    if REF omitted and stdin is a TTY
+
+Run modes (``--mode``): deploy (default), discover (validate existing;
+needs ``--endpoint`` or auto-detect), cache (PVC download only).
+
+Other notable flags: ``--mock`` (simulator; default image
+``DEFAULT_MOCK_IMAGE``), ``--render-image``, auth/pull-secret, PVC storage,
+P/D node selectors, GuideLLM image, ``--html`` / ``--fail-fast`` / 6h timeout.
+"""
 
 from __future__ import annotations
 
@@ -150,6 +169,8 @@ def main():
 def _list_testcases(testcase_dir: str):
     import yaml
 
+    from conformance.config import iter_config_yamls
+
     ref_file = Path("deploy/manifests/.manifest-ref")
     if ref_file.exists():
         info = ref_file.read_text().strip()
@@ -158,7 +179,7 @@ def _list_testcases(testcase_dir: str):
         print("Manifests: not set up (run --setup <branch>)")
     print()
     print("Test cases:")
-    for f in sorted(Path(testcase_dir).glob("*.yaml")):
+    for f in iter_config_yamls(testcase_dir):
         with open(f) as fh:
             data = yaml.safe_load(fh)
         name = data.get("name", f.stem)
@@ -170,6 +191,8 @@ def _list_testcases(testcase_dir: str):
 def _list_profiles():
     import yaml
 
+    from conformance.config import iter_config_yamls
+
     ref_file = Path("deploy/manifests/.manifest-ref")
     if ref_file.exists():
         info = ref_file.read_text().strip()
@@ -178,7 +201,7 @@ def _list_profiles():
         print("Manifests: not set up (run --setup <branch>)")
     print()
     print("Profiles:")
-    for f in sorted(Path("configs/profiles").glob("*.yaml")):
+    for f in iter_config_yamls("configs/profiles"):
         with open(f) as fh:
             data = yaml.safe_load(fh)
         name = data.get("name", f.stem)
@@ -258,10 +281,12 @@ def _setup_manifests(ref: str):
 
     print(f"Manifests ready in {manifest_dir}/ (branch: {ref}, commit: {commit[:8]})")
 
+    from conformance.config import iter_config_yamls
+
     testcase_dir = Path("configs/testcases")
     if testcase_dir.exists():
         print("\nTest cases:")
-        for tc_file in sorted(testcase_dir.glob("*.yaml")):
+        for tc_file in iter_config_yamls(testcase_dir):
             with open(tc_file) as fh:
                 data = yaml.safe_load(fh)
             name = data.get("name", tc_file.stem)

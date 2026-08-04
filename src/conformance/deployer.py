@@ -1,4 +1,27 @@
-"""Kubernetes deployer for LLMInferenceService resources."""
+"""LLMInferenceService lifecycle via kubectl (no Python K8s client).
+
+``Deployer`` applies manifests, waits for readiness, port-forwards gateway
+and workload pods, and cleans up. Cluster I/O is always ``kubectl``
+subprocess calls.
+
+Deploy / patch:
+  - Apply with retry for transient webhook / CRD-not-found errors
+  - Manifest patching: model URI (hf→pvc), mock simulator image, LoRA
+    adapters, pull secrets, ``--disable-auth``, env overrides, network
+    attach, P/D node selectors, render sidecar
+  - Pull-secret propagation from operator namespaces; gateway
+    ``allowedRoutes`` so the test namespace is accepted
+  - EPP metrics RBAC (``ClusterRoleBinding``) for authenticated scrape
+
+Wait / diagnose:
+  - Service, Gateway, pods, Ready condition; CrashLoopBackOff early fail
+  - Persistent Ready reason+message fast-fail; operator ImagePullBackOff
+    hints in ``OPERATOR_NAMESPACES``
+
+Endpoints:
+  - Gateway PF → inference (``get_endpoint``)
+  - Direct pod PF → health / models (``get_pod_endpoint``)
+"""
 
 from __future__ import annotations
 
