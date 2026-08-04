@@ -1,17 +1,26 @@
 """LLM-D conformance test suite.
 
-Each test case runs through ordered phases:
-  01. Prerequisites — CRD exists
-  02. Deploy — apply LLMInferenceService manifest
+Each test case runs through ordered phases (phases skip when disabled in
+config, when the manifest is missing, or when deploy failed / discover mode):
+
+  01. Prerequisites — CRD exists; manifest file present for branch
+  02. Deploy — apply LLMInferenceService manifest (skipped in discover mode)
   03. Service — wait for Service creation
   04. Gateway — wait for Gateway to be programmed
-  05. Pods — wait for pods to be Running
+  05. Pods — wait for pods to be Running (CrashLoopBackOff early fail)
   06. Ready — wait for LLMInferenceService Ready=True
-  07. Health — GET /health returns 200
-  08. Models — GET /v1/models lists the model
-  09. Inference — POST /v1/chat/completions and /v1/completions return tokens
-  10. Metrics — scrape and validate Prometheus metrics
-  99. Cleanup — delete LLMInferenceService
+  07. Health — GET /health returns 200 (direct pod; bypasses gateway EPP)
+  08. Models — GET /v1/models lists base model (+ LoRA adapters if configured)
+  09. Inference — chat/completions (+ LoRA adapter inference if configured)
+  10. Metrics (vLLM) — scrape workload pods; validate_vllm_basic
+  11. Metrics (cache) — prefix KV cache hits (vLLM + EPP; soft-fail in --mock)
+  12. Metrics (P/D) — prefill/decode token distribution
+  13. Metrics (scheduler) — EPP processed-request metrics
+  14. Metrics (flow control) — EPP dispatch activity
+  15. Metrics (LoRA) — adapter state on vLLM pods
+  20. Benchmark — GuideLLM Job; optional warmup; performance thresholds
+  21. Metrics (post-benchmark) — re-validate P/D after load
+  99. Cleanup — delete LLMInferenceService (honors --nocleanup / tc.cleanup)
 """
 
 from __future__ import annotations

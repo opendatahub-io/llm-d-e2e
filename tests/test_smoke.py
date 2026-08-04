@@ -1,4 +1,19 @@
-"""Smoke tests for framework validation — no cluster required."""
+"""Unit/smoke tests for the llm-d-e2e framework — no cluster required.
+
+Validates config loading, client helpers, deployer retry/fast-fail logic,
+manifest setup, and scaffolding scripts without kubectl against a live cluster.
+Run with: ``uv run pytest tests/test_smoke.py -v`` (or ``make unittest``).
+
+Coverage areas:
+  Config — duration parsing; load testcase/profile/dir; LoRA single/multi YAML
+  Metrics — Prometheus text exposition parsing
+  Client — bearer token headers; chat() string vs message-list prompts
+  Deployer — is_deployed tracking; webhook/CRD transient apply retries;
+    wait_for_ready persistent-error fast-fail and timeout messages;
+    operator ImagePullBackOff surfacing; env_overrides on decode+prefill
+  Manifests — --setup pruning of stale YAML; _require_manifest skip helpers
+  Scaffolding — scripts/new-testcase.sh generates loadable config; rejects dupes
+"""
 
 from __future__ import annotations
 
@@ -42,6 +57,27 @@ def test_load_all_testcases():
     assert len(cases) >= 1
     names = [tc.name for tc in cases]
     assert "single-gpu-smoke" in names
+
+
+def test_dir_loaders_skip_readme(tmp_path):
+    """README.md (and README*.yaml) next to configs must not be loaded as cases/profiles."""
+    from conformance.config import iter_config_yamls, load_profiles_from_dir, load_testcases_from_dir
+
+    cases_dir = tmp_path / "testcases"
+    profiles_dir = tmp_path / "profiles"
+    cases_dir.mkdir()
+    profiles_dir.mkdir()
+
+    (cases_dir / "README.md").write_text("# docs\n")
+    (cases_dir / "ok.yaml").write_text("name: ok\nmodel:\n  name: m\ndeployment:\n  manifestPath: x.yaml\n")
+    (cases_dir / "README.yaml").write_text("name: should-skip\n")
+    (profiles_dir / "README.md").write_text("# docs\n")
+    (profiles_dir / "smoke.yaml").write_text("name: smoke\ntestCases:\n  - ok\n")
+
+    assert [p.name for p in iter_config_yamls(cases_dir)] == ["ok.yaml"]
+    assert [p.name for p in iter_config_yamls(profiles_dir)] == ["smoke.yaml"]
+    assert [tc.name for tc in load_testcases_from_dir(cases_dir)] == ["ok"]
+    assert [p.name for p in load_profiles_from_dir(profiles_dir)] == ["smoke"]
 
 
 def test_parse_prometheus_text():

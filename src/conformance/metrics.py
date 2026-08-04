@@ -1,4 +1,26 @@
-"""Prometheus metrics scraping and validation for vLLM, EPP, and scheduler."""
+"""Prometheus metrics scraping and per-topology validation.
+
+Scraper discovers pods by label, scrapes ``/metrics`` via in-pod tooling
+(python3/wget) with port-forward + httpx fallback for minimal images, and
+uses a service-account bearer token for EPP when
+``--metrics-endpoint-auth=true`` (RHOAI 3.5+).
+
+Pod discovery labels:
+  - Workload / decode — ``llminferenceservice-workload``
+  - Prefill — ``llminferenceservice-workload-prefill``
+  - EPP — ``EPP_LABELS`` (several component names across llm-d versions)
+
+Validators (wired from ``test_conformance`` phases 10–15 / 21):
+  - ``validate_vllm_basic`` — request_success on workload pods
+  - ``validate_cache_aware`` — prefix cache queries/hits (+ EPP indexer)
+  - ``validate_pd`` — decode/prefill token-by-source and NIXL transfer signals
+  - ``validate_scheduler`` — EPP request / ready-pod metrics
+  - ``validate_flow_control`` — EPP dispatch / queue / saturation
+  - ``validate_lora`` — ``vllm:lora_requests_info`` on workload pods
+
+Also: ``parse_prometheus`` (text exposition), ``dump_raw_metrics`` (report
+artifacts), ``Metric`` / ``ScrapeResult`` / ``CheckResult`` dataclasses.
+"""
 
 from __future__ import annotations
 
