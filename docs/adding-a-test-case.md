@@ -212,6 +212,10 @@ testCases:
 # Pull the latest manifests (replace 'main' with your branch)
 uv run llm-d-e2e --setup main
 
+# Or pull from your own fork/branch before it merges upstream
+uv run llm-d-e2e --setup my-branch \
+  --manifest-repo https://github.com/<you>/llm-d-conformance-manifests.git
+
 # Verify your test case shows up
 uv run llm-d-e2e --list-testcases
 #   ✓ my-test-case  → my-test-case.yaml
@@ -221,6 +225,8 @@ uv run llm-d-e2e --list-profiles
 ```
 
 If your test case shows `✗ (missing)`, the manifest file isn't in the branch you pulled.
+`--setup` clones from `aneeshkp/llm-d-conformance-manifests` by default; add
+`--manifest-repo <URL>` to pull from a different repo (e.g. your fork).
 
 ## Step 5: Run the Test
 
@@ -617,6 +623,10 @@ git push
 ```bash
 # Pull the updated manifests
 uv run llm-d-e2e --setup main
+
+# Or, before merging upstream, pull from your fork/branch:
+uv run llm-d-e2e --setup my-branch \
+  --manifest-repo https://github.com/<my-org>/<my-repo>.git
 
 # Verify it shows up
 uv run llm-d-e2e --list-testcases
