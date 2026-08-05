@@ -167,6 +167,7 @@ class DeployConfig:
     manifest_path: str = ""
     namespace: str = ""
     replicas: int = 1
+    requires_gpu: bool = False
     service_account: str = ""
     ready_timeout: timedelta = field(default_factory=lambda: timedelta(minutes=15))
     resources: ResourceConfig = field(default_factory=ResourceConfig)

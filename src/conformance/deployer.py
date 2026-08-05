@@ -100,6 +100,7 @@ class Deployer:
         self._pod_pf_name: str = ""
         self._deployed: set[str] = set()
         self._render_image_cached: str | None = None
+        self._gpu_count: int | None = None
 
     @property
     def render_image(self) -> str:
@@ -125,6 +126,35 @@ class Deployer:
         if check and result.returncode != 0:
             raise RuntimeError(f"kubectl {' '.join(args)} failed: {result.stderr.strip()}")
         return result.stdout.strip()
+
+    def cluster_gpu_count(self) -> int:
+        """Total allocatable nvidia.com/gpu across all cluster nodes (0 if none).
+
+        Cached after the first query.
+        """
+        if self._gpu_count is not None:
+            return self._gpu_count
+        try:
+            out = self.kubectl(
+                "get",
+                "nodes",
+                "-o",
+                r'jsonpath={range .items[*]}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}',
+            )
+        except RuntimeError as e:
+            log.warning("Could not query node GPU capacity: %s", e)
+            return 0
+        total = 0
+        for line in out.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                total += int(line)
+            except ValueError:
+                continue
+        self._gpu_count = total
+        return total
 
     def ensure_namespace(self):
         try:

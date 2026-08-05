@@ -80,6 +80,11 @@ def main():
 
     # Behavior
     parser.add_argument("--nocleanup", action="store_true", help="Keep resources after test")
+    parser.add_argument(
+        "--need-gpu",
+        action="store_true",
+        help="Run requiresGpu test cases (they are skipped by default; use on a GPU cluster)",
+    )
     parser.add_argument("--report-dir", default="reports", help="Report output directory")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--fail-fast", "-x", action="store_true", help="Stop on first failure")
@@ -163,6 +168,8 @@ def main():
         pytest_args.append("--disable-auth")
     if args.nocleanup:
         pytest_args.append("--nocleanup")
+    if args.need_gpu:
+        pytest_args.append("--need-gpu")
     if args.verbose:
         pytest_args.append("-v")
     if args.fail_fast:
