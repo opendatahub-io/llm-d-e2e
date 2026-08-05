@@ -467,6 +467,83 @@ def test_setup_manifests_removes_stale_files(tmp_path, monkeypatch):
     assert "cache-aware.yaml" in remaining
 
 
+def test_setup_manifests_uses_custom_repo(tmp_path, monkeypatch):
+    """--manifest-repo <URL> must clone from the given repo, not the default.
+
+    The custom URL has to reach ``git clone`` and be recorded in .manifest-ref
+    so a later run can tell which fork the manifests came from.
+    """
+    import shutil
+    from unittest.mock import MagicMock, patch
+    import conformance.cli as cli_mod
+
+    monkeypatch.chdir(tmp_path)
+
+    custom_repo = "https://github.com/my-org/my-repo.git"
+
+    clone_dir = Path("/tmp/llm-d-manifests")
+    clone_dir.mkdir(exist_ok=True)
+    (clone_dir / "single-gpu.yaml").write_text("branch: my-branch")
+
+    clone_cmds = []
+
+    def fake_run(cmd, **kwargs):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = "abc1234deadbeef\n"
+        result.stderr = ""
+        if cmd[:2] == ["git", "clone"]:
+            clone_cmds.append(cmd)
+        if cmd[0] == "rm":
+            shutil.rmtree(str(clone_dir), ignore_errors=True)
+        return result
+
+    with patch.object(cli_mod, "subprocess") as mock_sub:
+        mock_sub.run.side_effect = fake_run
+        cli_mod._setup_manifests("my-branch", custom_repo)
+
+    # custom repo URL is shown in the git clone cmd.
+    assert clone_cmds, "git clone was never invoked"
+    assert custom_repo in clone_cmds[0]
+    assert cli_mod.MANIFEST_REPO not in clone_cmds[0]
+
+    ref_file = tmp_path / "deploy" / "manifests" / ".manifest-ref"
+    assert f"repo: {custom_repo}" in ref_file.read_text()
+
+
+def test_setup_manifests_defaults_to_upstream_repo(tmp_path, monkeypatch):
+    """Without --manifest-repo, _setup_manifests clones the upstream default."""
+    import shutil
+    from unittest.mock import MagicMock, patch
+    import conformance.cli as cli_mod
+
+    monkeypatch.chdir(tmp_path)
+
+    clone_dir = Path("/tmp/llm-d-manifests")
+    clone_dir.mkdir(exist_ok=True)
+    (clone_dir / "single-gpu.yaml").write_text("branch: main")
+
+    clone_cmds = []
+
+    def fake_run(cmd, **kwargs):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = "abc1234deadbeef\n"
+        result.stderr = ""
+        if cmd[:2] == ["git", "clone"]:
+            clone_cmds.append(cmd)
+        if cmd[0] == "rm":
+            shutil.rmtree(str(clone_dir), ignore_errors=True)
+        return result
+
+    with patch.object(cli_mod, "subprocess") as mock_sub:
+        mock_sub.run.side_effect = fake_run
+        cli_mod._setup_manifests("main")
+
+    assert clone_cmds, "git clone was never invoked"
+    assert cli_mod.MANIFEST_REPO in clone_cmds[0]
+
+
 def test_require_manifest_skips_when_missing(tmp_path):
     """test_01_prereq and test_02_deploy skip when the manifest file is absent."""
     from dataclasses import dataclass

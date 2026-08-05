@@ -96,6 +96,12 @@ def main():
         const="",
         help="Clone manifest repo (interactive if no branch given)",
     )
+    parser.add_argument(
+        "--manifest-repo",
+        default=MANIFEST_REPO,
+        metavar="URL",
+        help=f"Git repo to clone manifests from with --setup (default: {MANIFEST_REPO})",
+    )
 
     args = parser.parse_args()
 
@@ -108,12 +114,15 @@ def main():
         _list_profiles()
         return
 
+    if args.setup is None and args.manifest_repo != MANIFEST_REPO:
+        print("Warning: --manifest-repo has no effect without --setup", file=sys.stderr)
+
     if args.setup is not None:
         if args.setup == "":
-            ref = _interactive_setup() if sys.stdin.isatty() else "main"
+            ref = _interactive_setup(args.manifest_repo) if sys.stdin.isatty() else "main"
         else:
             ref = args.setup
-        _setup_manifests(ref)
+        _setup_manifests(ref, args.manifest_repo)
         sys.stdout.flush()
         if not args.testcase and not args.profile:
             return
@@ -211,8 +220,7 @@ def _list_profiles():
         print(f"  {'':20s} tests: {cases}")
 
 
-def _interactive_setup() -> str:
-    repo = MANIFEST_REPO
+def _interactive_setup(repo: str = MANIFEST_REPO) -> str:
     print(f"Fetching branches from {repo}...")
     result = subprocess.run(
         ["git", "ls-remote", "--heads", repo],
@@ -241,11 +249,10 @@ def _interactive_setup() -> str:
     return "main"
 
 
-def _setup_manifests(ref: str):
+def _setup_manifests(ref: str, repo: str = MANIFEST_REPO):
     import yaml
     from datetime import datetime, timezone
 
-    repo = MANIFEST_REPO
     manifest_dir = Path("deploy/manifests")
     manifest_dir.mkdir(parents=True, exist_ok=True)
 

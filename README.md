@@ -36,14 +36,24 @@ uv run llm-d-e2e --setup main          # latest
 uv run llm-d-e2e --setup 3.5-GA        # 3.5 GA manifests
 uv run llm-d-e2e --setup 3.4-stable    # 3.4 stable manifests
 
+# 3. Or pull from a different repo/branch (e.g. your fork, for local testing)
+uv run llm-d-e2e --setup my-branch \
+  --manifest-repo https://github.com/<my-org>/<my-repo>.git
+
 # 4. (Optional) Set up a shortcut
 alias e2e='uv run llm-d-e2e'
 ```
+
+By default `--setup` clones manifests from the upstream repo
+(`https://github.com/aneeshkp/llm-d-conformance-manifests.git`). Use
+`--manifest-repo <URL>` to pull from any other repo — combined with a branch name,
+this lets you test manifests from your own fork before they merge upstream.
 
 You can also use `make setup` which provides the same interactive branch selection:
 ```bash
 make setup                      # interactive — lists branches, pick one
 make setup BRANCH=3.5-GA        # direct — specific branch
+make setup BRANCH=my-branch MANIFEST_REPO=https://github.com/<my-org>/<my-repo>.git
 ```
 
 ## Quick Start
@@ -203,6 +213,7 @@ docker run --rm quay.io/aneeshkp/llm-d-e2e --setup 3.5-GA
 - **Build time**: `main` branch manifests are baked into the image (configurable via `--build-arg MANIFEST_REF=`)
 - **Runtime `--setup <branch>`**: clones the specified branch from GitHub, replaces baked-in manifests
 - **Runtime `--setup`** (interactive, requires `-it`): lists all branches from GitHub, prompts to pick
+- **Runtime `--manifest-repo <URL>`**: clone from a different repo instead of the default (`aneeshkp/llm-d-conformance-manifests`) — works with both direct and interactive `--setup`, and with a branch name lets you test a fork before it merges upstream
 - Network access to GitHub is required at runtime for `--setup`; without it, the baked-in manifests are used
 
 ## Test Cases
