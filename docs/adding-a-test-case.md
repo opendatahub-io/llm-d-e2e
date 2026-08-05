@@ -262,7 +262,7 @@ This means your manifest's scheduler/EPP config must be compatible with the RHAI
 
 ## GPU Gate
 
-Some test cases need a real GPU to run at all. For example `kv-offloading-cpu` offloads the KV cache *to* CPU memory, but the model still runs on a GPU. To keep these out of CPU-only cluster, a test case marks its need with `requiresGpu: true`. Such test cases are **skipped by default** and run only when you pass **`--need-gpu`**.
+Some test cases need a real GPU to run at all. For example `kv-offloading-cpu` offloads the KV cache *to* CPU memory, but the model still runs on a GPU. To keep these out of CPU-only clusters, a test case marks its need with `requiresGpu: true`. Such test cases are **skipped by default** and run only when you pass **`--need-gpu`**.
 
 ### Mark a test case as needing a GPU
 

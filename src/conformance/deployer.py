@@ -100,6 +100,7 @@ class Deployer:
         self._pod_pf_name: str = ""
         self._deployed: set[str] = set()
         self._render_image_cached: str | None = None
+        self._gpu_count: int | None = None
 
     @property
     def render_image(self) -> str:
@@ -131,7 +132,7 @@ class Deployer:
 
         Cached after the first query.
         """
-        if getattr(self, "_gpu_count", None) is not None:
+        if self._gpu_count is not None:
             return self._gpu_count
         try:
             out = self.kubectl(

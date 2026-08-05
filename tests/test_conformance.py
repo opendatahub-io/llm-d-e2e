@@ -93,7 +93,7 @@ class TestConformance:
     def test_01_prereq(self, deployer: Deployer, tc: TestCase, mock_mode: bool, need_gpu: bool, test_mode: str):
         """LLMInferenceService CRD must be installed and manifest must exist."""
         _require_manifest(tc)
-        _require_gpu(deployer, tc, mock_mode, need_gpu, test_mode)
+        _require_gpu(deployer, tc, mock_mode, need_gpu, test_mode)  # skip following step if no GPU detected.
         found = deployer.check_crd_exists(LLMISVC_CRD)
         _log(f"CRD {LLMISVC_CRD}: {'found' if found else 'NOT FOUND'}")
         if not found:
@@ -113,7 +113,7 @@ class TestConformance:
         if test_mode == "discover":
             pytest.skip("discover mode — skipping deploy")
         _require_manifest(tc)
-        _require_gpu(deployer, tc, mock_mode, need_gpu, test_mode)
+        _require_gpu(deployer, tc, mock_mode, need_gpu, test_mode)  # skip following step if no GPU detected.
         if not deployer.check_crd_exists(LLMISVC_CRD):
             pytest.skip(f"CRD {LLMISVC_CRD} not found — cannot deploy")
         _log(f"Deploying {tc.deployment.manifest_path} as '{tc.name}'")
