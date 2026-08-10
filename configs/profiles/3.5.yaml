@@ -8,5 +8,7 @@ testCases:
   - flow-control-tokens
   - lora-single
   - lora-multi
+  - kv-offloading-cpu
+  - kv-offloading-tiered
 parallel: false
 timeout: 120m
