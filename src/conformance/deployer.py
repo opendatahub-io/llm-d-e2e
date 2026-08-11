@@ -208,6 +208,13 @@ class Deployer:
             self.kubectl("get", "namespace", self.namespace, check=True)
         except RuntimeError:
             self.kubectl("create", "namespace", self.namespace)
+        self.kubectl(
+            "label",
+            "namespace",
+            self.namespace,
+            "inference-gateway-access=true",
+            "--overwrite",
+        )
 
     def ensure_pull_secret(self, secret_name: str, source_namespaces: list[str] | None = None):
         """Copy a pull secret into the test namespace if it doesn't already exist."""
@@ -252,35 +259,6 @@ class Deployer:
                     if s.get("name"):
                         names.add(s["name"])
         return sorted(names)
-
-    def ensure_gateway_allows_namespace(self):
-        """Patch the inference gateway to allow HTTPRoutes from the test namespace."""
-        try:
-            allowed = self.kubectl(
-                "get",
-                "gateway",
-                "inference-gateway",
-                "-n",
-                "redhat-ods-applications",
-                "-o",
-                "jsonpath={.spec.listeners[0].allowedRoutes.namespaces.from}",
-                check=False,
-            )
-            if allowed == "All":
-                return
-            self.kubectl(
-                "patch",
-                "gateway",
-                "inference-gateway",
-                "-n",
-                "redhat-ods-applications",
-                "--type=json",
-                "-p",
-                '[{"op":"replace","path":"/spec/listeners/0/allowedRoutes/namespaces/from","value":"All"}]',
-            )
-            log.info("Patched inference-gateway to allow routes from all namespaces")
-        except RuntimeError as e:
-            log.warning("Could not patch gateway allowedRoutes: %s", e)
 
     def ensure_metrics_rbac(self, name: str):
         """Bind the EPP service account to kserve-metrics-reader-cluster-role for metrics scraping."""
@@ -449,7 +427,6 @@ class Deployer:
             self._ensure_clean_slate(tc.name)
             for secret_name in self._collect_pull_secrets(manifest):
                 self.ensure_pull_secret(secret_name)
-            self.ensure_gateway_allows_namespace()
             self._apply_with_webhook_retry(tmp_path)
             self.ensure_metrics_rbac(tc.name)
             result.success = True
