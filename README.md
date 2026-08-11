@@ -13,6 +13,10 @@ Python + pytest rewrite of the [Go/Ginkgo conformance framework](https://github.
 - `kubectl` configured with cluster access
 - Cluster with `LLMInferenceService` CRD installed (RHAI or KServe)
 
+### xKS cluster requirements
+
+The test suite automatically labels the `llm-conformance-test` namespace with `inference-gateway-access=true` so HTTPRoutes are accepted by the inference gateway. The gateway must be configured with a namespace label selector that matches this label — refer to your platform's installation guide for the correct helm values.
+
 Install uv if you don't have it:
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh

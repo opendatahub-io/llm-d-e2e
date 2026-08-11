@@ -119,7 +119,7 @@ The gateway service name and namespace are RHOAI-specific hardcoded values in `d
 ### Source modules (`src/conformance/`)
 
 - **config.py** — Dataclass config types and YAML loaders. YAML keys are camelCase, Python fields are snake_case; `_build()` handles recursive conversion.
-- **deployer.py** — `Deployer`: manages LLMInferenceService lifecycle via `kubectl` subprocess calls. Handles deploy, wait-for-ready, port-forwarding, manifest patching (mock image, pull secrets, auth disable, LoRA spec injection, node selectors, env overrides), EPP metrics RBAC, pull secret propagation, gateway namespace allowance, and cleanup.
+- **deployer.py** — `Deployer`: manages LLMInferenceService lifecycle via `kubectl` subprocess calls. Handles deploy, wait-for-ready, port-forwarding, manifest patching (mock image, pull secrets, auth disable, LoRA spec injection, node selectors, env overrides), EPP metrics RBAC, pull secret propagation, namespace labeling for gateway access, and cleanup.
 - **client.py** — `LLMClient`: OpenAI-compatible HTTP client (httpx) for `/health`, `/v1/models`, `/v1/completions`, `/v1/chat/completions`.
 - **metrics.py** — `Scraper`: scrapes Prometheus metrics from pods via `kubectl exec` (python3/wget), falling back to port-forward + httpx for minimal containers. Per-topology validators: `validate_vllm_basic`, `validate_cache_aware`, `validate_pd`, `validate_scheduler`, `validate_flow_control`, `validate_lora`. `parse_prometheus()` parses text exposition format.
 - **model.py** — `ModelDownloader`: creates PVCs and download Jobs for pre-caching models from HuggingFace.
@@ -191,6 +191,16 @@ Use `scripts/new-testcase.sh <name>` to generate stubs, then customize:
 - Health/models go directly to pods; inference goes through the gateway — the EPP only routes inference requests.
 - Metrics scraping tries `kubectl exec` first (python3, wget), falls back to port-forward + httpx for minimal container images.
 - Global pytest timeout is 21600s (6 hours) to accommodate slow model downloads and pod startup.
+
+### Gateway namespace access (xKS / rhoai-3.5+)
+
+As of [odh-gitops PR#156](https://github.com/opendatahub-io/odh-gitops/pull/156), the inference gateway uses a label selector instead of `allowedRoutes.namespaces.from: All`. The helm chart install must include:
+
+```bash
+--set-json 'components.kserve.gateway.allowedRoutes.namespaces={"from":"Selector","selector":{"matchLabels":{"inference-gateway-access":"true"}}}'
+```
+
+`ensure_namespace()` labels the test namespace with `inference-gateway-access=true` (idempotent, applied on every run) so HTTPRoutes from `llm-conformance-test` are accepted by the gateway. No cluster-admin gateway patching is required or performed.
 
 ## Config files
 
