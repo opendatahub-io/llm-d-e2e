@@ -11,7 +11,7 @@ End-to-end conformance test suite for [llm-d](https://github.com/llm-d) / KServe
 - Python 3.11+, [uv](https://docs.astral.sh/uv/) package manager
 - `kubectl` configured with cluster access (for conformance tests, not unit tests)
 - Cluster with `LLMInferenceService` CRD installed (RHAI or KServe)
-- Manifests from [llm-d-conformance-manifests](https://github.com/aneeshkp/llm-d-conformance-manifests) (cloned via `--setup`)
+- Manifests from [llm-d-conformance-manifests](https://github.com/opendatahub-io/llm-d-conformance-manifests) (cloned via `--setup`)
 
 ## Common Commands
 
