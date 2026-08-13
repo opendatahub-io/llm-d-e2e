@@ -6,9 +6,10 @@ testCases:
   - cache-aware
   - flow-control
   - flow-control-tokens
+  - pd
   - lora-single
   - lora-multi
   - kv-offloading-cpu
   - kv-offloading-tiered
 parallel: false
-timeout: 120m
+timeout: 180m
