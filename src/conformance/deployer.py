@@ -45,6 +45,7 @@ PREFILL_LABEL = "app.kubernetes.io/name={name},app.kubernetes.io/component=llmin
 
 OPERATOR_NAMESPACES = ("redhat-ods-applications", "redhat-ods-operator", "rhaii")
 _IMAGE_PULL_FAILURE_REASONS = ("ImagePullBackOff", "ErrImagePull")
+_TRANSIENT_READY_REASONS = frozenset({"MinimumReplicasUnavailable", "HTTPRoutesNotReady"})
 
 
 def _parse_node_selector(value: str) -> dict[str, str]:
@@ -505,7 +506,7 @@ class Deployer:
                 # non-empty reason+message pair repeats across 3 consecutive
                 # polls (~45s), the error is unlikely to self-heal (RBAC,
                 # missing CRD, webhook misconfiguration, etc.).
-                if status == "False" and reason != "waiting" and message:
+                if status == "False" and reason != "waiting" and reason not in _TRANSIENT_READY_REASONS and message:
                     error_key = f"{reason}:{message}"
                     if error_key == _prev_error_key:
                         _error_repeat_count += 1

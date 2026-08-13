@@ -67,13 +67,24 @@ def _require_deployed(deployer: Deployer, tc: TestCase, test_mode: str) -> None:
         pytest.skip(f"skipped — deploy failed or was skipped for '{tc.name}'")
 
 
-def _require_gpu(deployer: Deployer, tc: TestCase, mock_mode: bool, need_gpu: bool, test_mode: str) -> None:
-    if test_mode == "discover" or not tc.deployment.requires_gpu or mock_mode:
+def _require_gpu(deployer: Deployer, tc: TestCase, mock_mode: bool, test_mode: str) -> None:
+    if test_mode == "discover":
         return
-    if not need_gpu:
-        pytest.skip(f"'{tc.name}' requires a GPU — pass --need-gpu to run it")
-    if deployer.cluster_gpu_count() == 0:
-        pytest.skip(f"'{tc.name}' requires a GPU but cluster has no allocatable nvidia.com/gpu")
+    if mock_mode:
+        if tc.deployment.requires_gpu:
+            pytest.skip(f"'{tc.name}' has requiresGpu set — cannot be validated in mock mode")
+        return
+    per_pod = tc.deployment.resources.gpus
+    if per_pod <= 0:
+        return
+    replicas = tc.deployment.replicas or 1
+    needed = per_pod * replicas
+    if tc.deployment.prefill:
+        prefill_gpus = tc.deployment.prefill.resources.gpus
+        needed += prefill_gpus * (tc.deployment.prefill.replicas or 1)
+    available = deployer.cluster_gpu_count()
+    if available < needed:
+        pytest.skip(f"'{tc.name}' needs {needed} GPU(s) but cluster has {available}")
 
 
 def _check_threshold(name: str, value: float, min_value: float | None = None, max_value: float | None = None) -> bool:
@@ -92,10 +103,10 @@ def _check_threshold(name: str, value: float, min_value: float | None = None, ma
 class TestConformance:
     """Ordered conformance phases for each test case."""
 
-    def test_01_prereq(self, deployer: Deployer, tc: TestCase, mock_mode: bool, need_gpu: bool, test_mode: str):
+    def test_01_prereq(self, deployer: Deployer, tc: TestCase, mock_mode: bool, test_mode: str):
         """LLMInferenceService CRD must be installed and manifest must exist."""
         _require_manifest(tc)
-        _require_gpu(deployer, tc, mock_mode, need_gpu, test_mode)  # skip following step if no GPU detected.
+        _require_gpu(deployer, tc, mock_mode, test_mode)
         found = deployer.check_crd_exists(LLMISVC_CRD)
         _log(f"CRD {LLMISVC_CRD}: {'found' if found else 'NOT FOUND'}")
         if not found:
@@ -110,12 +121,12 @@ class TestConformance:
                 )
             assert False, f"CRD {LLMISVC_CRD} not found"
 
-    def test_02_deploy(self, deployer: Deployer, tc: TestCase, test_mode: str, mock_mode: bool, need_gpu: bool):
+    def test_02_deploy(self, deployer: Deployer, tc: TestCase, test_mode: str, mock_mode: bool):
         """Deploy the LLMInferenceService manifest."""
         if test_mode == "discover":
             pytest.skip("discover mode — skipping deploy")
         _require_manifest(tc)
-        _require_gpu(deployer, tc, mock_mode, need_gpu, test_mode)  # skip following step if no GPU detected.
+        _require_gpu(deployer, tc, mock_mode, test_mode)
         if not deployer.check_crd_exists(LLMISVC_CRD):
             pytest.skip(f"CRD {LLMISVC_CRD} not found — cannot deploy")
         _log(f"Deploying {tc.deployment.manifest_path} as '{tc.name}'")

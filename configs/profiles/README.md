@@ -38,8 +38,7 @@ Prefer `-p` for CI / release suites; use `-t` when you need one or two cases.
 | `pd-performance` | `pd-performance` | GuideLLM P/D benchmarks |
 | `moe` | `moe` | Needs 8 GPUs + RDMA/RoCE |
 | `3.4` | single-gpu (+ no-scheduler), cache-aware | RHOAI 3.4 suite |
-| `3.5` | single-gpu, cache-aware, flow-control*, lora* | RHOAI 3.5 (no P/D) |
-| `3.5-gpu` | 3.5 + `pd`, `pd-cache-aware` | RHOAI 3.5 with P/D / more GPU |
+| `3.5` | single-gpu, cache-aware, flow-control*, pd, lora*, kv-offloading* | RHOAI 3.5 (auto-skips tests needing more GPUs than available) |
 | `all` | Broad set (scheduler, P/D, flow-control, lora) | Full conformance sweep |
 
 Exact descriptions and timeouts are in each file.
