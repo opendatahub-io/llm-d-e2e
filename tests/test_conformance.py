@@ -80,7 +80,7 @@ def _require_gpu(deployer: Deployer, tc: TestCase, mock_mode: bool, test_mode: s
     replicas = tc.deployment.replicas or 1
     needed = per_pod * replicas
     if tc.deployment.prefill:
-        prefill_gpus = tc.deployment.prefill.resources.gpus or per_pod
+        prefill_gpus = tc.deployment.prefill.resources.gpus
         needed += prefill_gpus * (tc.deployment.prefill.replicas or 1)
     available = deployer.cluster_gpu_count()
     if available < needed:

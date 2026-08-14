@@ -89,6 +89,14 @@ def main():
     parser.add_argument("--list-testcases", action="store_true", help="List available test cases")
     parser.add_argument("--list-profiles", action="store_true", help="List available profiles")
     parser.add_argument(
+        "--cache-model",
+        default=None,
+        metavar="MODEL",
+        nargs="?",
+        const="Qwen/Qwen3-0.6B",
+        help="Download a model into a shared PVC (default: Qwen/Qwen3-0.6B). No tests run.",
+    )
+    parser.add_argument(
         "--setup",
         default=None,
         metavar="REF",
@@ -112,6 +120,16 @@ def main():
 
     if args.list_profiles:
         _list_profiles()
+        return
+
+    if args.cache_model is not None:
+        _cache_model(
+            args.cache_model,
+            namespace=args.namespace,
+            kubeconfig=args.kubeconfig,
+            storage_class=args.storage_class,
+            storage_size=args.storage_size,
+        )
         return
 
     if args.setup is None and args.manifest_repo != MANIFEST_REPO:
@@ -302,6 +320,43 @@ def _setup_manifests(ref: str, repo: str = MANIFEST_REPO):
                 print(f"  \033[32m✓\033[0m {name:<28s} → {manifest}")
             else:
                 print(f"  \033[31m✗\033[0m {name:<28s} → {manifest} (missing)")
+
+
+def _cache_model(
+    model_name: str,
+    namespace: str = "llm-conformance-test",
+    kubeconfig: str = "",
+    storage_class: str = "",
+    storage_size: str = "10Gi",
+):
+    from conformance.deployer import Deployer
+    from conformance.model import ModelDownloader, _model_pvc_name
+    from conformance.config import TestCase, ModelConfig, CacheConfig, DeployConfig
+
+    cache = CacheConfig(enabled=True, storage_size=storage_size or "10Gi", keep_pvc=True)
+    model = ModelConfig(name=model_name, uri=f"hf://{model_name}", cache=cache)
+    tc = TestCase(name="cache", model=model, deployment=DeployConfig())
+
+    pvc_name = _model_pvc_name(tc)
+    print(f"Caching model '{model_name}' into PVC '{pvc_name}' in namespace '{namespace}'")
+
+    deployer = Deployer(kubeconfig=kubeconfig, namespace=namespace)
+    deployer.ensure_namespace()
+
+    downloader = ModelDownloader(
+        kubectl_fn=deployer.kubectl,
+        namespace=namespace,
+        storage_class=storage_class,
+        storage_size=storage_size,
+    )
+    result = downloader.download(tc)
+
+    if result.status == "ready":
+        print(f"\033[32m✓\033[0m Model cached in PVC '{pvc_name}' ({result.duration:.1f}s)")
+        print("\nUse with: uv run llm-d-e2e -p configs/profiles/3.5.yaml --model-source pvc -v")
+    else:
+        print(f"\033[31m✗\033[0m Cache failed: {result.error}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

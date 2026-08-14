@@ -2,7 +2,7 @@
 
 End-to-end conformance tests for [llm-d](https://github.com/llm-d) / KServe `LLMInferenceService` deployments on Kubernetes.
 
-**Guides:** [Adding a Test Case](docs/adding-a-test-case.md)
+**Guides:** [Adding a Test Case](docs/adding-a-test-case.md) | [Caching Models](docs/caching-models.md)
 
 ## Prerequisites
 
@@ -90,8 +90,8 @@ e2e -t single-gpu --nocleanup
 # Simulate vLLM with llm-d-inference-sim (no GPU needed)
 e2e -t single-gpu --mock
 
-# Run GPU test cases (use profiles to select GPU vs non-GPU suites)
-e2e -p configs/profiles/3.5-gpu.yaml
+# Run full 3.5 profile (auto-skips tests needing more GPUs than available)
+e2e -p configs/profiles/3.5.yaml
 
 # Verbose output, stop on first failure
 e2e -t single-gpu -v -x

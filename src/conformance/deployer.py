@@ -45,6 +45,7 @@ PREFILL_LABEL = "app.kubernetes.io/name={name},app.kubernetes.io/component=llmin
 
 OPERATOR_NAMESPACES = ("redhat-ods-applications", "redhat-ods-operator", "rhaii")
 _IMAGE_PULL_FAILURE_REASONS = ("ImagePullBackOff", "ErrImagePull")
+_TRANSIENT_READY_REASONS = frozenset({"MinimumReplicasUnavailable", "HTTPRoutesNotReady"})
 
 
 def _parse_node_selector(value: str) -> dict[str, str]:
@@ -116,13 +117,13 @@ class Deployer:
         log.info("Using render image: %s", default)
         return default
 
-    def kubectl(self, *args: str, check: bool = True) -> str:
+    def kubectl(self, *args: str, check: bool = True, input_data: str | None = None) -> str:
         cmd = ["kubectl"]
         if self.kubeconfig:
             cmd += ["--kubeconfig", self.kubeconfig]
         cmd += list(args)
         log.debug("kubectl %s", " ".join(args))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, input=input_data)
         if check and result.returncode != 0:
             raise RuntimeError(f"kubectl {' '.join(args)} failed: {result.stderr.strip()}")
         return result.stdout.strip()
@@ -505,8 +506,7 @@ class Deployer:
                 # non-empty reason+message pair repeats across 3 consecutive
                 # polls (~45s), the error is unlikely to self-heal (RBAC,
                 # missing CRD, webhook misconfiguration, etc.).
-                _transient_reasons = {"MinimumReplicasUnavailable", "HTTPRoutesNotReady"}
-                if status == "False" and reason != "waiting" and reason not in _transient_reasons and message:
+                if status == "False" and reason != "waiting" and reason not in _TRANSIENT_READY_REASONS and message:
                     error_key = f"{reason}:{message}"
                     if error_key == _prev_error_key:
                         _error_repeat_count += 1
@@ -889,7 +889,12 @@ class Deployer:
             self._replace_vllm_image(spec, self.mock_image, tc.model.name, lora=tc.model.lora)
         elif tc.model.uri:
             model = spec.setdefault("model", {})
-            model["uri"] = tc.model.uri
+            if self.model_source == "pvc":
+                from conformance.model import _model_pvc_name
+
+                model["uri"] = f"pvc://{_model_pvc_name(tc)}/"
+            else:
+                model["uri"] = tc.model.uri
             model["name"] = tc.model.name
             self._inject_lora_spec(model, tc.model.lora)
 
