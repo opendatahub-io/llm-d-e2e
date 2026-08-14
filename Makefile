@@ -1,4 +1,4 @@
-MANIFEST_REPO ?= https://github.com/aneeshkp/llm-d-conformance-manifests.git
+MANIFEST_REPO ?= https://github.com/opendatahub-io/llm-d-conformance-manifests.git
 BRANCH        ?=
 MANIFEST_REF  ?= $(if $(BRANCH),$(BRANCH),main)
 MANIFEST_DIR  ?= deploy/manifests
@@ -82,6 +82,7 @@ setup: ## Clone manifest repo (MANIFEST_REF=branch, or interactive if not set)
 
 .PHONY: _do-setup
 _do-setup:
+	@mkdir -p $(MANIFEST_DIR)
 	@rm -rf $(MANIFEST_DIR)/*.yaml
 	@git clone --depth 1 --branch $(MANIFEST_REF) $(MANIFEST_REPO) /tmp/llm-d-manifests
 	@COMMIT=$$(git -C /tmp/llm-d-manifests rev-parse HEAD); \
@@ -102,6 +103,27 @@ _do-setup:
 			printf "  \033[31m✗\033[0m %-28s → %s (missing)\n" "$$name" "$$manifest"; \
 		fi; \
 	done
+
+.PHONY: validate-manifests
+validate-manifests: ## Validate all manifests against the cluster CRD (dry-run)
+	@if [ ! -d $(MANIFEST_DIR) ] || [ -z "$$(ls $(MANIFEST_DIR)/*.yaml 2>/dev/null)" ]; then \
+		echo "No manifests found — run 'make setup' first"; exit 1; \
+	fi
+	@echo "Validating manifests against cluster (dry-run)..."
+	@FAIL=0; \
+	kubectl get namespace $(NAMESPACE) >/dev/null 2>&1 || kubectl create namespace $(NAMESPACE) >/dev/null 2>&1; \
+	for f in $(MANIFEST_DIR)/*.yaml; do \
+		name=$$(basename $$f); \
+		if kubectl apply --dry-run=server -n $(NAMESPACE) -f $$f >/dev/null 2>&1; then \
+			printf "  \033[32m✓\033[0m %s\n" "$$name"; \
+		else \
+			printf "  \033[31m✗\033[0m %s\n" "$$name"; \
+			kubectl apply --dry-run=server -n $(NAMESPACE) -f $$f 2>&1 | sed 's/^/    /'; \
+			FAIL=1; \
+		fi; \
+	done; \
+	if [ $$FAIL -eq 1 ]; then echo ""; echo "Validation failed"; exit 1; \
+	else echo ""; echo "All manifests valid"; fi
 
 .PHONY: sync
 sync: ## Install dependencies with uv

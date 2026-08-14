@@ -1,11 +1,15 @@
 """HuggingFace model download into a PVC for pre-cached test runs.
 
 Used when ``--model-source pvc`` or ``--mode cache``. ``ModelDownloader``
-creates a PVC (optional ``storageClass`` / size override) and a Job that
-runs ``huggingface-cli download`` into ``/models``. If ``cache.keepPVC``
-is true and the PVC already exists, the download is skipped.
+creates a ReadWriteMany PVC (optional ``storageClass`` / size override)
+and a Job that runs ``hf download`` into ``/mnt/models``. If
+``cache.keepPVC`` is true and the PVC already exists, the download is
+skipped.
 
-``pvc_uri()`` returns ``pvc://<name>/models`` so the deployer can rewrite
+PVC naming: one shared PVC per unique model (``model-<sanitized-name>``),
+not per test case. All test cases using the same model share one PVC.
+
+``pvc_uri()`` returns ``pvc://<name>/`` so the deployer can rewrite
 the LLMInferenceService model URI from ``hf://`` to the cached PVC.
 ``CacheResult.status`` is one of: ready, downloading, failed, not_found.
 """
@@ -19,6 +23,15 @@ from dataclasses import dataclass
 from conformance.config import TestCase
 
 log = logging.getLogger(__name__)
+
+
+def _model_pvc_name(tc: TestCase) -> str:
+    if tc.model.cache.pvc_name:
+        return tc.model.cache.pvc_name
+    sanitized = tc.model.name.lower().replace("/", "-").replace("_", "-").replace(".", "-")
+    name = f"model-{sanitized}"
+    return name[:63]
+
 
 JOB_TEMPLATE = """\
 apiVersion: batch/v1
@@ -38,10 +51,10 @@ spec:
           args:
             - |
               pip install -q huggingface-hub &&
-              huggingface-cli download {model_name} --local-dir /models
+              hf download {model_name} --local-dir /mnt/models
           volumeMounts:
             - name: model-storage
-              mountPath: /models
+              mountPath: /mnt/models
           resources:
             requests:
               cpu: "1"
@@ -59,8 +72,8 @@ metadata:
   name: {pvc_name}
   namespace: {namespace}
 spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
+  accessModes: ["ReadWriteMany"]
+{storage_class_line}  resources:
     requests:
       storage: {storage_size}
 """
@@ -89,9 +102,9 @@ class ModelDownloader:
         if not cache.enabled:
             return CacheResult(tc.model.name, "", "not_found")
 
-        pvc_name = cache.pvc_name or f"model-{tc.name}"
+        pvc_name = _model_pvc_name(tc)
         storage_size = self.storage_size_override or cache.storage_size
-        safe_name = tc.name.replace("_", "-")
+        safe_name = pvc_name
 
         start = time.time()
         result = CacheResult(tc.model.name, pvc_name, "downloading")
@@ -114,7 +127,10 @@ class ModelDownloader:
         except RuntimeError:
             pass
 
-        pvc_yaml = PVC_TEMPLATE.format(pvc_name=pvc_name, namespace=self.namespace, storage_size=storage_size)
+        sc_line = f"  storageClassName: {self.storage_class}\n" if self.storage_class else ""
+        pvc_yaml = PVC_TEMPLATE.format(
+            pvc_name=pvc_name, namespace=self.namespace, storage_size=storage_size, storage_class_line=sc_line
+        )
         self._kubectl("apply", "-f", "-", input_data=pvc_yaml)
 
         job_yaml = JOB_TEMPLATE.format(
@@ -153,5 +169,4 @@ class ModelDownloader:
         return result
 
     def pvc_uri(self, tc: TestCase) -> str:
-        pvc_name = tc.model.cache.pvc_name or f"model-{tc.name}"
-        return f"pvc://{pvc_name}/models"
+        return f"pvc://{_model_pvc_name(tc)}/"

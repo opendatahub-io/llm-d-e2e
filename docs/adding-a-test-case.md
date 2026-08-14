@@ -16,13 +16,13 @@ Step-by-step guide to add a new conformance test case to llm-d-e2e.
 A test case has two parts:
 
 1. **Test case config** (`configs/testcases/<name>.yaml`) — defines model, resources, validation criteria, and which metrics to check.
-2. **LLMInferenceService manifest** (`deploy/manifests/<name>.yaml`) — the Kubernetes manifest that gets applied to the cluster. Lives in the [llm-d-conformance-manifests](https://github.com/aneeshkp/llm-d-conformance-manifests) repo.
+2. **LLMInferenceService manifest** (`deploy/manifests/<name>.yaml`) — the Kubernetes manifest that gets applied to the cluster. Lives in the [llm-d-conformance-manifests](https://github.com/opendatahub-io/llm-d-conformance-manifests) repo.
 
 The test framework loads the config, patches the manifest (mock image swap, pull secrets, auth), applies it via `kubectl`, then runs ordered phases: deploy, service, gateway, pods, ready, health, models, inference, metrics, cleanup.
 
 ## Step 1: Create the Manifest
 
-Create the LLMInferenceService YAML in the [conformance-manifests repo](https://github.com/aneeshkp/llm-d-conformance-manifests). Use `single-gpu-smoke.yaml` as a minimal starting point:
+Create the LLMInferenceService YAML in the [conformance-manifests repo](https://github.com/opendatahub-io/llm-d-conformance-manifests). Use `single-gpu-smoke.yaml` as a minimal starting point:
 
 ```yaml
 apiVersion: serving.kserve.io/v1alpha1
@@ -226,7 +226,7 @@ uv run llm-d-e2e --list-profiles
 ```
 
 If your test case shows `✗ (missing)`, the manifest file isn't in the branch you pulled.
-`--setup` clones from `aneeshkp/llm-d-conformance-manifests` by default; add
+`--setup` clones from `opendatahub-io/llm-d-conformance-manifests` by default; add
 `--manifest-repo <URL>` to pull from a different repo (e.g. your fork).
 
 ## Step 5: Run the Test

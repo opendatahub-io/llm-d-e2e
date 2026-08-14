@@ -129,19 +129,19 @@ def test_list_workload_pods_parses_and_filters_blanks(monkeypatch):
     assert d.list_workload_pods("my-isvc") == ["pod-a", "pod-b"]
 
 
-def test_require_gpu_skips_when_flag_not_set():
-    """A requiresGpu test case skips by default (unless --need-gpu is passed)."""
+def test_require_gpu_skips_in_mock_mode():
+    """A requiresGpu test case skips in mock mode."""
     sys.path.insert(0, str(Path(__file__).parent))
     import test_conformance as tc_mod
 
     tc = load_testcase("configs/testcases/single-gpu-smoke.yaml")
     tc.deployment.requires_gpu = True
-    with pytest.raises(pytest.skip.Exception, match="requires a GPU"):
-        tc_mod._require_gpu(deployer=None, tc=tc, mock_mode=False, need_gpu=False, test_mode="deploy")
+    with pytest.raises(pytest.skip.Exception, match="has requiresGpu set"):
+        tc_mod._require_gpu(deployer=None, tc=tc, mock_mode=True, test_mode="deploy")
 
 
-def test_require_gpu_runs_when_flag_and_gpu_present():
-    """With --need-gpu and GPUs available (cluster_gpu_count > 0), the case does not skip."""
+def test_require_gpu_runs_when_cluster_has_enough():
+    """With enough GPUs available, the case does not skip."""
     sys.path.insert(0, str(Path(__file__).parent))
     import test_conformance as tc_mod
 
@@ -151,7 +151,23 @@ def test_require_gpu_runs_when_flag_and_gpu_present():
 
     tc = load_testcase("configs/testcases/single-gpu-smoke.yaml")
     tc.deployment.requires_gpu = True
-    tc_mod._require_gpu(deployer=FakeDeployer(), tc=tc, mock_mode=False, need_gpu=True, test_mode="deploy")
+    tc_mod._require_gpu(deployer=FakeDeployer(), tc=tc, mock_mode=False, test_mode="deploy")
+
+
+def test_require_gpu_skips_when_not_enough_gpus():
+    """Skips when cluster has fewer GPUs than the test case needs."""
+    sys.path.insert(0, str(Path(__file__).parent))
+    import test_conformance as tc_mod
+
+    class FakeDeployer:
+        def cluster_gpu_count(self):
+            return 1
+
+    tc = load_testcase("configs/testcases/single-gpu-smoke.yaml")
+    tc.deployment.resources.gpus = 1
+    tc.deployment.replicas = 3
+    with pytest.raises(pytest.skip.Exception, match="needs 3 GPU"):
+        tc_mod._require_gpu(deployer=FakeDeployer(), tc=tc, mock_mode=False, test_mode="deploy")
 
 
 def test_apply_with_webhook_retry_succeeds_after_transient_error(monkeypatch):

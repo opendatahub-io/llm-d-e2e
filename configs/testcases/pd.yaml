@@ -13,6 +13,7 @@ model:
 deployment:
   manifestPath: pd.yaml
   replicas: 1
+  requiresGpu: true
   readyTimeout: 15m
   resources:
     cpu: "4"

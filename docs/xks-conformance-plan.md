@@ -22,7 +22,7 @@ Add llm-d / LLMInferenceService conformance tests to `opendatahub-io/opendatahub
 
 These use `ocp_resources` Python K8s client, OCP Routes, DSC resource, and RHOAI-specific fixtures.
 
-### Our standalone suite (`aneeshkp/llm-d-e2e`)
+### Our standalone suite (`opendatahub-io/llm-d-e2e`)
 
 - Python + pytest, kubectl subprocess, data-driven YAML configs
 - Platform-agnostic (OCP, AKS, EKS, GKE)
