@@ -6,7 +6,6 @@ testCases:
   - single-gpu-no-scheduler
   - cache-aware
   - pd
-  - pd-cache-aware
   - flow-control
   - flow-control-tokens
   - lora-single

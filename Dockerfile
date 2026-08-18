@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 ARG MANIFEST_REF=main
-ARG MANIFEST_REPO=https://github.com/aneeshkp/llm-d-conformance-manifests.git
+ARG MANIFEST_REPO=https://github.com/opendatahub-io/llm-d-conformance-manifests.git
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git && \

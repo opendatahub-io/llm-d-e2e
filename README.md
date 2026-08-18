@@ -2,8 +2,6 @@
 
 End-to-end conformance tests for [llm-d](https://github.com/llm-d) / KServe `LLMInferenceService` deployments on Kubernetes.
 
-Python + pytest rewrite of the [Go/Ginkgo conformance framework](https://github.com/aneeshkp/llm-d-conformance-test). See that project's [architecture docs](https://github.com/aneeshkp/llm-d-conformance-test/blob/main/docs/architecture.md) for detailed diagrams, test topologies, and metrics coverage.
-
 **Guides:** [Adding a Test Case](docs/adding-a-test-case.md)
 
 ## Prerequisites
@@ -26,7 +24,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/aneeshkp/llm-d-e2e.git
+git clone https://github.com/opendatahub-io/llm-d-e2e.git
 cd llm-d-e2e
 
 # 2. Install dependencies
@@ -49,7 +47,7 @@ alias e2e='uv run llm-d-e2e'
 ```
 
 By default `--setup` clones manifests from the upstream repo
-(`https://github.com/aneeshkp/llm-d-conformance-manifests.git`). Use
+(`https://github.com/opendatahub-io/llm-d-conformance-manifests.git`). Use
 `--manifest-repo <URL>` to pull from any other repo — combined with a branch name,
 this lets you test manifests from your own fork before they merge upstream.
 
@@ -84,7 +82,7 @@ e2e -t single-gpu
 e2e -t single-gpu,cache-aware
 
 # Setup manifests and run tests in one command
-e2e --setup 3.5-GA -t single-gpu,cache-aware --mock -v
+e2e --setup 3.5-GA -t single-gpu,cache-aware
 
 # Keep resources after test (for debugging)
 e2e -t single-gpu --nocleanup
@@ -92,8 +90,11 @@ e2e -t single-gpu --nocleanup
 # Simulate vLLM with llm-d-inference-sim (no GPU needed)
 e2e -t single-gpu --mock
 
-# Run test require GPU (requiresGpu) — skipped on CPU only cluster by default; opt in on a GPU cluster
-e2e -t kv-offloading-cpu --need-gpu
+# Run full 3.5 profile (auto-skips tests needing more GPUs than available)
+e2e -p configs/profiles/3.5.yaml
+
+# Run 3.5 profile in mock mode (no GPU needed, requiresGpu tests skipped)
+e2e -p configs/profiles/3.5.yaml --mock -v
 
 # Verbose output, stop on first failure
 e2e -t single-gpu -v -x
@@ -129,7 +130,7 @@ This skips the deploy and cleanup phases — only runs health, models, inference
 
 ## Container Image
 
-The test suite is available as a container image at `quay.io/aneeshkp/llm-d-e2e`.
+The test suite is available as a container image at `quay.io/opendatahub/llm-d-e2e`.
 
 ### Build
 
@@ -147,21 +148,21 @@ docker build --build-arg MANIFEST_REF=3.5-GA -t llm-d-e2e:3.5 .
 # Run with baked-in manifests
 docker run --rm \
   -v ~/.kube:/root/.kube:z \
-  quay.io/aneeshkp/llm-d-e2e \
+  quay.io/opendatahub/llm-d-e2e \
   -t single-gpu-smoke --mock -v
 
 # Use a non-default kubeconfig
 docker run --rm \
   -e KUBECONFIG=/root/.kube/my-cluster \
   -v ~/.kube:/root/.kube:z \
-  quay.io/aneeshkp/llm-d-e2e \
+  quay.io/opendatahub/llm-d-e2e \
   -t single-gpu-smoke,single-gpu,cache-aware --mock -v
 
 # Setup different manifests and run tests in one command
 docker run --rm \
   -e KUBECONFIG=/root/.kube/my-cluster \
   -v ~/.kube:/root/.kube:z \
-  quay.io/aneeshkp/llm-d-e2e \
+  quay.io/opendatahub/llm-d-e2e \
   --setup 3.5-GA \
   -t cache-aware,flow-control,flow-control-tokens --mock -v
 
@@ -170,7 +171,7 @@ docker run --rm \
   -e KUBECONFIG=/root/.kube/my-cluster \
   -v ~/.kube:/root/.kube:z \
   -v $(pwd)/reports:/app/reports:z \
-  quay.io/aneeshkp/llm-d-e2e \
+  quay.io/opendatahub/llm-d-e2e \
   -t single-gpu-smoke --mock --html reports/mock-ci.html -v
 ```
 
@@ -178,11 +179,11 @@ docker run --rm \
 
 ```bash
 # List available branches and pick one (requires -it for interactive prompt)
-docker run --rm -it quay.io/aneeshkp/llm-d-e2e --setup
+docker run --rm -it quay.io/opendatahub/llm-d-e2e --setup
 
 # Direct — no prompt
-docker run --rm quay.io/aneeshkp/llm-d-e2e --setup 3.5-GA
-docker run --rm quay.io/aneeshkp/llm-d-e2e --setup 3.4-stable
+docker run --rm quay.io/opendatahub/llm-d-e2e --setup 3.5-GA
+docker run --rm quay.io/opendatahub/llm-d-e2e --setup 3.4-stable
 ```
 
 ### Interactive mode
@@ -193,7 +194,7 @@ docker run --rm -it \
   -e KUBECONFIG=/root/.kube/my-cluster \
   -v ~/.kube:/root/.kube:z \
   -v $(pwd)/reports:/app/reports:z \
-  --entrypoint bash quay.io/aneeshkp/llm-d-e2e
+  --entrypoint bash quay.io/opendatahub/llm-d-e2e
 
 # Inside the container:
 uv run llm-d-e2e --setup              # interactive branch selection
@@ -206,13 +207,13 @@ uv run llm-d-e2e -t cache-aware --mock --html reports/cache.html -v
 
 ```bash
 # List test cases
-docker run --rm quay.io/aneeshkp/llm-d-e2e --list-testcases
+docker run --rm quay.io/opendatahub/llm-d-e2e --list-testcases
 
 # List profiles
-docker run --rm quay.io/aneeshkp/llm-d-e2e --list-profiles
+docker run --rm quay.io/opendatahub/llm-d-e2e --list-profiles
 
 # Setup only (clone manifests, show test case mapping)
-docker run --rm quay.io/aneeshkp/llm-d-e2e --setup 3.5-GA
+docker run --rm quay.io/opendatahub/llm-d-e2e --setup 3.5-GA
 ```
 
 ### How manifests work in the container
@@ -220,7 +221,7 @@ docker run --rm quay.io/aneeshkp/llm-d-e2e --setup 3.5-GA
 - **Build time**: `main` branch manifests are baked into the image (configurable via `--build-arg MANIFEST_REF=`)
 - **Runtime `--setup <branch>`**: clones the specified branch from GitHub, replaces baked-in manifests
 - **Runtime `--setup`** (interactive, requires `-it`): lists all branches from GitHub, prompts to pick
-- **Runtime `--manifest-repo <URL>`**: clone from a different repo instead of the default (`aneeshkp/llm-d-conformance-manifests`) — works with both direct and interactive `--setup`, and with a branch name lets you test a fork before it merges upstream
+- **Runtime `--manifest-repo <URL>`**: clone from a different repo instead of the default (`opendatahub-io/llm-d-conformance-manifests`) — works with both direct and interactive `--setup`, and with a branch name lets you test a fork before it merges upstream
 - Network access to GitHub is required at runtime for `--setup`; without it, the baked-in manifests are used
 
 ## Test Cases
@@ -232,11 +233,12 @@ docker run --rm quay.io/aneeshkp/llm-d-e2e --setup 3.5-GA
 | single-gpu-no-scheduler | 3 | K8s native round-robin |
 | cache-aware | 2 | Prefix KV cache routing |
 | pd | 3 | Prefill/Decode disaggregation |
-| pd-cache-aware | 3 | P/D + prefix cache |
 | moe | 8 | MoE, RDMA, expert parallelism |
 | multi-pool | 2 | Multiple InferencePools |
 | flow-control | 1 | Flow control with utilization-based saturation detector |
 | flow-control-tokens | 1 | Flow control with token-based concurrency detector |
+| kv-offloading-cpu | 1 | KV cache offloading to CPU memory |
+| kv-offloading-tiered | 1 | KV cache offloading to CPU + filesystem tiers |
 | pd-performance | 16 | P/D benchmark with GuideLLM (4 prefill + 2 decode, NIXL, RDMA) |
 
 ## Test Phases
