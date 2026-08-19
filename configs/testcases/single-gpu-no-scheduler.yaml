@@ -12,7 +12,7 @@ model:
     timeout: 15m
 deployment:
   manifestPath: single-gpu-no-scheduler.yaml
-  replicas: 3
+  replicas: 1
   readyTimeout: 15m
   resources:
     cpu: "4"
