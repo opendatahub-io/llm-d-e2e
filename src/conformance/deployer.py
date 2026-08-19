@@ -1036,9 +1036,15 @@ class Deployer:
                         "valueFrom": {"fieldRef": {"fieldPath": "status.podIP"}},
                     }
                 )
-            resources = container.get("resources", {})
+            # The simulator does not load the real model, so it needs a tiny,
+            # node-independent footprint. Drop the GPU and shrink cpu/memory to
+            # fixed small values so mock runs schedule on any node (incl. small
+            # CPU pools) regardless of the manifest's real-model requests.
+            resources = container.setdefault("resources", {})
             for section in ("limits", "requests"):
                 resources.get(section, {}).pop("nvidia.com/gpu", None)
+            resources["requests"] = {"cpu": "500m", "memory": "1Gi"}
+            resources["limits"] = {"cpu": "1", "memory": "2Gi"}
 
     def _inject_pull_secret(self, spec: dict, secret_name: str):
         for template in self._pod_templates(spec):
