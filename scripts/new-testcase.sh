@@ -31,12 +31,10 @@ model:
     timeout: 15m
 deployment:
   manifestPath: ${NAME}.yaml
-  replicas: 1
   readyTimeout: 10m
   resources:
     cpu: "2"
     memory: 8Gi
-    gpus: 1
     rdma: false
 validation:
   healthEndpoint: /health

@@ -40,8 +40,7 @@ def test_load_testcase():
     tc = load_testcase("configs/testcases/single-gpu-smoke.yaml")
     assert tc.name == "single-gpu-smoke"
     assert tc.model.name == "Qwen/Qwen3-0.6B"
-    assert tc.deployment.replicas == 1
-    assert tc.deployment.resources.gpus == 1
+    assert tc.deployment.manifest_path == "single-gpu-smoke.yaml"
     assert tc.validation.health_port == 8000
     assert tc.validation.test_prompts
 
@@ -129,6 +128,107 @@ def test_list_workload_pods_parses_and_filters_blanks(monkeypatch):
     assert d.list_workload_pods("my-isvc") == ["pod-a", "pod-b"]
 
 
+def _write_manifest(tmp_path, body: str) -> "tuple":
+    """Write a manifest into a temp manifest_dir; return (Deployer, tc) wired to it.
+
+    A ``spec:``-only body is wrapped in a minimal LLMInferenceService document so
+    the kind filter in Deployer._manifest_specs recognizes it; full documents
+    (with their own ``kind:``) are written verbatim.
+    """
+    from conformance.deployer import Deployer
+
+    if body.lstrip().startswith("spec:"):
+        body = "apiVersion: serving.kserve.io/v1alpha2\nkind: LLMInferenceService\n" + body
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    (manifest_dir / "case.yaml").write_text(body)
+    d = Deployer(manifest_dir=str(manifest_dir))
+    tc = load_testcase("configs/testcases/single-gpu-smoke.yaml")
+    tc.deployment.manifest_path = "case.yaml"
+    return d, tc
+
+
+def test_manifest_replicas_sums_decode_and_prefill(tmp_path):
+    """manifest_replicas = spec.replicas + spec.prefill.replicas (P/D)."""
+    d, tc = _write_manifest(
+        tmp_path,
+        "spec:\n  replicas: 2\n  prefill:\n    replicas: 3\n",
+    )
+    assert d.manifest_replicas(tc) == 5
+
+
+def test_manifest_replicas_defaults_to_one(tmp_path):
+    """Absent spec.replicas defaults to 1 (matches KServe)."""
+    d, tc = _write_manifest(tmp_path, "spec:\n  model:\n    name: x\n")
+    assert d.manifest_replicas(tc) == 1
+
+
+def test_manifest_gpu_needed_sums_decode_and_prefill(tmp_path):
+    """manifest_gpu_needed = sum over decode+prefill of replicas x peak container gpu limit."""
+    body = (
+        "spec:\n"
+        "  replicas: 2\n"
+        "  template:\n"
+        "    containers:\n"
+        "      - name: main\n"
+        "        resources:\n"
+        "          limits:\n"
+        "            nvidia.com/gpu: 1\n"
+        "  prefill:\n"
+        "    replicas: 3\n"
+        "    template:\n"
+        "      containers:\n"
+        "        - name: main\n"
+        "          resources:\n"
+        "            limits:\n"
+        "              nvidia.com/gpu: 2\n"
+    )
+    d, tc = _write_manifest(tmp_path, body)
+    assert d.manifest_gpu_needed(tc) == 2 * 1 + 3 * 2  # 8
+
+
+def test_manifest_gpu_needed_zero_when_no_gpu(tmp_path):
+    """A CPU-only manifest requests zero GPUs (so _require_gpu won't skip on GPU count)."""
+    body = "spec:\n  replicas: 1\n  template:\n    containers:\n      - name: main\n"
+    d, tc = _write_manifest(tmp_path, body)
+    assert d.manifest_gpu_needed(tc) == 0
+
+
+def test_manifest_counts_sum_across_multi_document_manifest(tmp_path):
+    """Multi-document manifests (e.g. multi-pool) are summed across LLMISVC docs, not crashed on."""
+    doc = (
+        "apiVersion: serving.kserve.io/v1alpha2\n"
+        "kind: LLMInferenceService\n"
+        "spec:\n"
+        "  replicas: 1\n"
+        "  template:\n"
+        "    containers:\n"
+        "      - name: main\n"
+        "        resources:\n"
+        "          limits:\n"
+        "            nvidia.com/gpu: 1\n"
+    )
+    d, tc = _write_manifest(tmp_path, doc + "---\n" + doc)
+    assert d.manifest_replicas(tc) == 2  # 1 + 1
+    assert d.manifest_gpu_needed(tc) == 2  # 1 + 1
+
+
+def test_manifest_counts_ignore_non_llmisvc_documents(tmp_path):
+    """Non-LLMInferenceService documents in a manifest are skipped, not counted."""
+    body = (
+        "apiVersion: v1\n"
+        "kind: ConfigMap\n"
+        "metadata:\n  name: noise\n"
+        "data:\n  replicas: '99'\n"
+        "---\n"
+        "apiVersion: serving.kserve.io/v1alpha2\n"
+        "kind: LLMInferenceService\n"
+        "spec:\n  replicas: 2\n"
+    )
+    d, tc = _write_manifest(tmp_path, body)
+    assert d.manifest_replicas(tc) == 2  # ConfigMap ignored
+
+
 def test_require_gpu_skips_in_mock_mode():
     """A requiresGpu test case skips in mock mode."""
     sys.path.insert(0, str(Path(__file__).parent))
@@ -141,11 +241,14 @@ def test_require_gpu_skips_in_mock_mode():
 
 
 def test_require_gpu_runs_when_cluster_has_enough_gpu():
-    """With enough GPUs available, the case does not skip."""
+    """With enough GPUs available (manifest need <= cluster), the case does not skip."""
     sys.path.insert(0, str(Path(__file__).parent))
     import test_conformance as tc_mod
 
     class FakeDeployer:
+        def manifest_gpu_needed(self, tc):
+            return 2
+
         def cluster_gpu_count(self):
             return 2
 
@@ -155,17 +258,18 @@ def test_require_gpu_runs_when_cluster_has_enough_gpu():
 
 
 def test_require_gpu_skips_when_not_enough_gpus():
-    """Skips when cluster has fewer GPUs than the test case needs."""
+    """Skips when the cluster has fewer GPUs than the manifest requests."""
     sys.path.insert(0, str(Path(__file__).parent))
     import test_conformance as tc_mod
 
     class FakeDeployer:
+        def manifest_gpu_needed(self, tc):
+            return 3
+
         def cluster_gpu_count(self):
             return 1
 
     tc = load_testcase("configs/testcases/single-gpu-smoke.yaml")
-    tc.deployment.resources.gpus = 1
-    tc.deployment.replicas = 3
     with pytest.raises(pytest.skip.Exception, match="needs 3 GPU"):
         tc_mod._require_gpu(deployer=FakeDeployer(), tc=tc, mock_mode=False, test_mode="deploy")
 
@@ -679,8 +783,6 @@ def test_new_testcase_script_generates_loadable_config(tmp_path, monkeypatch):
     tc = load_testcase(str(config_path))
     assert tc.name == "my-gen-test"
     assert tc.deployment.manifest_path == "my-gen-test.yaml"
-    assert tc.deployment.replicas == 1
-    assert tc.deployment.resources.gpus == 1
     assert tc.validation.health_port == 8000
     assert tc.validation.test_prompts == ["What is 2+2?"]
     assert tc.validation.metrics_check.check_vllm is True

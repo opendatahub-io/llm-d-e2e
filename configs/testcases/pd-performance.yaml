@@ -13,19 +13,15 @@ model:
     timeout: 90m
 deployment:
   manifestPath: pd-performance.yaml
-  replicas: 2
   readyTimeout: 15m
   resources:
     cpu: "16"
     memory: 64Gi
-    gpus: 4
     rdma: true
   prefill:
-    replicas: 2
     resources:
       cpu: "16"
       memory: 64Gi
-      gpus: 4
       rdma: true
 validation:
   healthEndpoint: /health

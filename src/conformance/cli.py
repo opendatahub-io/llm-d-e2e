@@ -176,9 +176,8 @@ def main():
 
 
 def _list_testcases(testcase_dir: str):
-    import yaml
-
-    from conformance.config import iter_config_yamls
+    from conformance.config import iter_config_yamls, load_testcase
+    from conformance.deployer import Deployer
 
     ref_file = Path("deploy/manifests/.manifest-ref")
     if ref_file.exists():
@@ -188,13 +187,16 @@ def _list_testcases(testcase_dir: str):
         print("Manifests: not set up (run --setup <branch>)")
     print()
     print("Test cases:")
+    dep = Deployer()
     for f in iter_config_yamls(testcase_dir):
-        with open(f) as fh:
-            data = yaml.safe_load(fh)
-        name = data.get("name", f.stem)
-        desc = data.get("description", "")
-        gpus = data.get("deployment", {}).get("resources", {}).get("gpus", "?")
-        print(f"  {name:<28s} [{gpus} GPU]  {desc}")
+        tc = load_testcase(str(f))
+        # GPU count is sourced from the manifest (single source of truth); "?" when
+        # manifests aren't cloned yet (--list-testcases can run before --setup).
+        try:
+            gpus = dep.manifest_gpu_needed(tc)
+        except FileNotFoundError:
+            gpus = "?"
+        print(f"  {tc.name:<28s} [{gpus} GPU]  {tc.description}")
 
 
 def _list_profiles():

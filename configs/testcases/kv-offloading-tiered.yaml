@@ -12,13 +12,11 @@ model:
     timeout: 15m
 deployment:
   manifestPath: kv-offloading-tiered.yaml
-  replicas: 1
   requiresGpu: true
   readyTimeout: 10m
   resources:
     cpu: "4"
     memory: 32Gi
-    gpus: 1
     rdma: false
 validation:
   healthEndpoint: /health
