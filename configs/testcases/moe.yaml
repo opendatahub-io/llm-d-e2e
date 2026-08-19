@@ -11,7 +11,6 @@ model:
     keepPVC: true
 deployment:
   manifestPath: moe.yaml
-  replicas: 1
   serviceAccount: hfsa
   readyTimeout: 90m
   networkAttachment: roce-p2
@@ -19,7 +18,6 @@ deployment:
   resources:
     cpu: "128"
     memory: 512Gi
-    gpus: 8
     ephemeralStorage: 800Gi
     rdma: true
   parallelism:

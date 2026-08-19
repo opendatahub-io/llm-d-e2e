@@ -74,14 +74,9 @@ def _require_gpu(deployer: Deployer, tc: TestCase, mock_mode: bool, test_mode: s
         if tc.deployment.requires_gpu:
             pytest.skip(f"'{tc.name}' has requiresGpu set — cannot be validated in mock mode")
         return
-    per_pod = tc.deployment.resources.gpus
-    if per_pod <= 0:
+    needed = deployer.manifest_gpu_needed(tc)
+    if needed <= 0:
         return
-    replicas = tc.deployment.replicas or 1
-    needed = per_pod * replicas
-    if tc.deployment.prefill:
-        prefill_gpus = tc.deployment.prefill.resources.gpus
-        needed += prefill_gpus * (tc.deployment.prefill.replicas or 1)
     available = deployer.cluster_gpu_count()
     if available < needed:
         pytest.skip(f"'{tc.name}' needs {needed} GPU(s) but cluster has {available}")
@@ -158,7 +153,8 @@ class TestConformance:
         _log(f"Waiting for pods to be Running (timeout: {timeout:.0f}s)")
         pods = deployer.wait_for_pods(tc.name, timeout=timeout, print_fn=_log)
         _log(f"All pods running: {', '.join(pods)}")
-        assert len(pods) >= tc.deployment.replicas, f"Expected {tc.deployment.replicas} pods, got {len(pods)}"
+        expected = deployer.manifest_replicas(tc)
+        assert len(pods) >= expected, f"Expected {expected} pods, got {len(pods)}"
 
     def test_06_ready(self, deployer: Deployer, tc: TestCase, test_mode: str):
         """LLMInferenceService should become Ready."""

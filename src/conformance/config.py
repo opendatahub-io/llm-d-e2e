@@ -7,8 +7,9 @@ the two recursively. Duration fields named ``timeout``, ``ready_timeout``, or
 Hierarchy (``configs/testcases/*.yaml`` → ``TestCase``):
   - ``model`` — name/URI, optional ``cache``, optional ``lora`` (adapters,
     maxRank, maxAdapters)
-  - ``deployment`` — manifestPath, replicas, resources, parallelism,
+  - ``deployment`` — manifestPath, requiresGpu, resources, parallelism,
     prefill, worker, networkAttach, envOverrides, readyTimeout
+    (replica and GPU counts come from the manifest, not here)
   - ``validation`` — health, prompts / chatPrompts, metricsCheck flags
     (vLLM, cache, P/D, scheduler, flow control, NIXL, LoRA), benchmark
   - ``cleanup`` — whether phase 99 deletes resources
@@ -60,9 +61,10 @@ class CacheConfig:
 class ResourceConfig:
     cpu: str = "4"
     memory: str = "32Gi"
-    gpus: int = 1
     ephemeral_storage: str = ""
     rdma: bool = False
+    # NOTE: GPU count is read from the manifest (Deployer.manifest_gpu_needed), not here —
+    # the manifest is the single source of truth for what KServe actually requests.
 
 
 @dataclass
@@ -75,9 +77,9 @@ class ParallelismConfig:
 
 @dataclass
 class PrefillConfig:
-    replicas: int = 1
     parallelism: ParallelismConfig | None = None
     resources: ResourceConfig = field(default_factory=ResourceConfig)
+    # NOTE: prefill replica count is read from the manifest (spec.prefill.replicas), not here.
 
 
 @dataclass
@@ -168,7 +170,6 @@ class ModelConfig:
 class DeployConfig:
     manifest_path: str = ""
     namespace: str = ""
-    replicas: int = 1
     requires_gpu: bool = False
     service_account: str = ""
     ready_timeout: timedelta = field(default_factory=lambda: timedelta(minutes=15))

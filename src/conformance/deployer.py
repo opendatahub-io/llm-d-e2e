@@ -157,6 +157,61 @@ class Deployer:
         self._gpu_count = total
         return total
 
+    def _manifest_specs(self, tc: TestCase) -> list[dict]:
+        """All LLMInferenceService ``spec`` blocks in the manifest for this test case.
+
+        The manifest is the single source of truth for replica and GPU counts —
+        it is what KServe actually deploys — so the test never keeps its own copy.
+        Supports multi-document manifests (e.g. multi-pool, which declares several
+        LLMInferenceServices separated by ``---``); non-LLMISVC documents are ignored.
+        """
+        manifest_path = self.manifest_dir / tc.deployment.manifest_path
+        return [
+            doc.get("spec", {}) or {}
+            for doc in yaml.safe_load_all(manifest_path.read_text())
+            if doc and doc.get("kind") == "LLMInferenceService"
+        ]
+
+    def manifest_replicas(self, tc: TestCase) -> int:
+        """Workload pods the manifest declares: decode (spec.replicas) + prefill,
+        summed across every LLMInferenceService document.
+
+        This is the floor for the pod-count assertion; extra pods (EPP/scheduler)
+        are absorbed by the caller's ``>=`` comparison.
+        """
+        total = 0
+        for spec in self._manifest_specs(tc):
+            total += int(spec.get("replicas", 1))
+            prefill = spec.get("prefill")
+            if prefill:
+                total += int(prefill.get("replicas", 1))
+        return total
+
+    def manifest_gpu_needed(self, tc: TestCase) -> int:
+        """Total nvidia.com/gpu the manifest requests across decode + prefill,
+        summed across every LLMInferenceService document.
+
+        Per section: replicas x the peak ``nvidia.com/gpu`` limit among its
+        containers. Reads the raw manifest (unpatched), so mock-mode GPU stripping
+        does not affect it — callers skip this in mock mode.
+        """
+
+        def _section(section: dict) -> int:
+            replicas = int(section.get("replicas", 1))
+            limits = [
+                int(c.get("resources", {}).get("limits", {}).get("nvidia.com/gpu", 0))
+                for c in section.get("template", {}).get("containers", [])
+            ]
+            return replicas * max(limits or [0])
+
+        needed = 0
+        for spec in self._manifest_specs(tc):
+            needed += _section(spec)
+            prefill = spec.get("prefill")
+            if prefill:
+                needed += _section(prefill)
+        return needed
+
     def list_workload_pods(self, name: str) -> list[str]:
         """Return all workload pod names for an LLMInferenceService."""
         label = WORKLOAD_LABEL.format(name=name)
