@@ -42,7 +42,7 @@ validation:
     checkScheduler: true
   benchmark:
     enabled: true
-    image: ghcr.io/vllm-project/guidellm:v0.6.0
+    image: ghcr.io/vllm-project/guidellm:v0.7.3
     rate: 200
     maxSeconds: 240
     data: "prompt_tokens=8000,prompt_tokens_stdev=8500,prompt_tokens_min=50,prompt_tokens_max=30000,output_tokens=800,output_tokens_stdev=1500,output_tokens_min=20,output_tokens_max=8000"
