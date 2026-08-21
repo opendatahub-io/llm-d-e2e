@@ -12,4 +12,4 @@ testCases:
   - kv-offloading-cpu
   - kv-offloading-tiered
 parallel: false
-timeout: 360m
+timeout: 180m
