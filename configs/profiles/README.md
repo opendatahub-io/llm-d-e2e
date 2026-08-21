@@ -39,7 +39,7 @@ Prefer `-p` for CI / release suites; use `-t` when you need one or two cases.
 | `moe` | `moe` | Needs 8 GPUs + RDMA/RoCE |
 | `3.4` | single-gpu (+ no-scheduler), cache-aware | RHOAI 3.4 suite |
 | `3.5` | single-gpu, cache-aware, flow-control*, pd, lora*, kv-offloading* | RHOAI 3.5 (auto-skips tests needing more GPUs than available) |
-| `3.6` | 3.5 | RHOAI 3.6 ea1 has no difference than 3.5 |
+| `3.6` | same as `3.5` | RHOAI 3.6 EA1 has no differences from 3.5 |
 | `all` | Broad set (scheduler, P/D, flow-control, lora) | Full conformance sweep |
 
 Exact descriptions and timeouts are in each file.
