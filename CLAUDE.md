@@ -38,7 +38,7 @@ uv run llm-d-e2e --list-testcases                     # list available test case
 uv run llm-d-e2e --list-profiles                      # list available profiles
 
 # Run a single conformance phase (by method name prefix)
-uv run pytest tests/test_conformance.py -k "test_09_inference" --testcase single-gpu
+uv run pytest tests/test_conformance.py -k "test_09a_inference" --testcase single-gpu
 ```
 
 Makefile targets mirror CLI: `make test TESTCASE=single-gpu`, `make unittest`, `make lint`, `make format`, `make setup`.
@@ -74,7 +74,8 @@ The `--mode` flag controls which phases execute:
 | 06 | `test_06_ready` | LLMInferenceService Ready=True |
 | 07 | `test_07_health` | GET /health (direct pod, bypasses EPP) |
 | 08 | `test_08_models` | GET /v1/models (direct pod, + LoRA adapters if configured) |
-| 09 | `test_09_inference` | Chat completions + completions (+ LoRA adapter inference) |
+| 09a | `test_09a_inference` | Chat completions + completions (+ LoRA adapter inference) |
+| 09b | `test_09b_messages_responses` | Anthropic /v1/messages + OpenAI /v1/responses |
 | 10 | `test_10_metrics_vllm` | Basic vLLM request success metrics |
 | 11 | `test_11_metrics_cache` | Prefix KV cache hit metrics |
 | 12 | `test_12_metrics_pd` | P/D token distribution + NIXL transfer metrics |
@@ -106,7 +107,7 @@ Two helpers control cascading skips across phases:
 ### Endpoint routing (gateway vs pod)
 
 Health and models endpoints return 503 through the Gateway API + EPP because EPP only handles inference. The suite uses two separate port-forwards:
-- **Gateway** (`client` fixture): `svc/inference-gateway-istio:80` in `redhat-ods-applications` — for `/v1/chat/completions`. HTTP.
+- **Gateway** (`client` fixture): `svc/inference-gateway-istio:80` (HTTP) in `redhat-ods-applications` — for `/v1/chat/completions`, `/v1/messages`, `/v1/responses`.
 - **Pod** (`pod_client` fixture): `workload-pod:8000` in the test namespace — for `/health` and `/v1/models`. HTTPS (self-signed).
 
 The gateway service name and namespace are RHOAI-specific hardcoded values in `deployer.py:_ensure_port_forward()`.
@@ -120,7 +121,7 @@ The gateway service name and namespace are RHOAI-specific hardcoded values in `d
 
 - **config.py** — Dataclass config types and YAML loaders. YAML keys are camelCase, Python fields are snake_case; `_build()` handles recursive conversion.
 - **deployer.py** — `Deployer`: manages LLMInferenceService lifecycle via `kubectl` subprocess calls. Handles deploy, wait-for-ready, port-forwarding, manifest patching (mock image, pull secrets, auth disable, LoRA spec injection, node selectors, env overrides), EPP metrics RBAC, pull secret propagation, namespace labeling for gateway access, and cleanup.
-- **client.py** — `LLMClient`: OpenAI-compatible HTTP client (httpx) for `/health`, `/v1/models`, `/v1/completions`, `/v1/chat/completions`.
+- **client.py** — `LLMClient`: HTTP client (httpx) for `/health`, `/v1/models`, `/v1/completions`, `/v1/chat/completions`, `/v1/messages`, `/v1/responses`.
 - **metrics.py** — `Scraper`: scrapes Prometheus metrics from pods via `kubectl exec` (python3/wget), falling back to port-forward + httpx for minimal containers. Per-topology validators: `validate_vllm_basic`, `validate_cache_aware`, `validate_pd`, `validate_scheduler`, `validate_flow_control`, `validate_lora`. `parse_prometheus()` parses text exposition format.
 - **model.py** — `ModelDownloader`: creates PVCs and download Jobs for pre-caching models from HuggingFace.
 - **report.py** — JSON report generation with pass/fail/skip summary.

@@ -187,6 +187,8 @@ class ValidateConfig:
     health_port: int = 8000
     health_scheme: str = "HTTPS"
     inference_check: bool = True
+    check_messages: bool = False
+    check_responses: bool = False
     test_prompts: list[str] = field(default_factory=list)
     # Send each prompt this many times (unique prefix per iteration) to build KV load.
     inference_repeat: int = 1

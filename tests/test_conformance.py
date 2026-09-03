@@ -11,7 +11,8 @@ config, when the manifest is missing, or when deploy failed / discover mode):
   06. Ready — wait for LLMInferenceService Ready=True
   07. Health — GET /health returns 200 (direct pod; bypasses gateway EPP)
   08. Models — GET /v1/models lists base model (+ LoRA adapters if configured)
-  09. Inference — chat/completions (+ LoRA adapter inference if configured)
+  09a. Inference — chat/completions (+ LoRA adapter inference if configured)
+  09b. Messages/Responses — Anthropic /v1/messages + OpenAI /v1/responses
   10. Metrics (vLLM) — scrape workload pods; validate_vllm_basic
   11. Metrics (cache) — prefix KV cache hits (vLLM + EPP; soft-fail in --mock)
   12. Metrics (P/D) — prefill/decode token distribution
@@ -194,8 +195,8 @@ class TestConformance:
                 assert name in models, f"LoRA adapter {name!r} not in /v1/models, got {models}"
             _log(f"All {len(tc.model.lora.adapters)} LoRA adapter(s) registered")
 
-    def test_09_inference(self, client: LLMClient, tc: TestCase):
-        """Inference should return tokens via /v1/chat/completions and /v1/completions."""
+    def test_09a_inference(self, client: LLMClient, tc: TestCase):
+        """Inference via /v1/chat/completions and /v1/completions."""
         if not tc.validation.inference_check:
             pytest.skip("inference check disabled")
 
@@ -241,6 +242,44 @@ class TestConformance:
                 _log(f"Sending LoRA inference with adapter '{adapter_name}'...")
                 resp = client.chat(model=adapter_name, prompt="Test LoRA adapter inference")
                 _assert_chat_response(resp, f"LoRA adapter: {adapter_name}")
+
+    def test_09b_messages_responses(self, client: LLMClient, tc: TestCase):
+        """Inference via Anthropic /v1/messages and OpenAI /v1/responses."""
+        if not tc.validation.check_messages and not tc.validation.check_responses:
+            pytest.skip("/v1/messages and /v1/responses checks disabled")
+
+        plain_prompts = tc.validation.test_prompts or ["What is 3+3?"]
+
+        if tc.validation.check_messages:
+            _log("Testing Anthropic /v1/messages endpoint...")
+            for prompt in plain_prompts:
+                _log(f"Sending /v1/messages prompt: '{prompt[:50]}...'")
+                resp = client.messages(model=tc.model.name, prompt=prompt)
+                content_blocks = resp.get("content", [])
+                assert content_blocks, f"/v1/messages: no content for prompt: {prompt}"
+                text = content_blocks[0].get("text", "")
+                in_tokens = resp.get("usage", {}).get("input_tokens", 0)
+                out_tokens = resp.get("usage", {}).get("output_tokens", 0)
+                _log(f"/v1/messages response: '{text[:80]}...' ({in_tokens}+{out_tokens} tokens)")
+                assert text or out_tokens > 0, f"/v1/messages: empty response for prompt: {prompt}"
+                assert out_tokens > 0, f"/v1/messages: no output tokens for prompt: {prompt}"
+
+        if tc.validation.check_responses:
+            _log("Testing OpenAI /v1/responses endpoint...")
+            for prompt in plain_prompts:
+                _log(f"Sending /v1/responses prompt: '{prompt[:50]}...'")
+                resp = client.responses(model=tc.model.name, prompt=prompt)
+                output = resp.get("output", [])
+                assert output, f"/v1/responses: no output for prompt: {prompt}"
+                output_text = ""
+                for item in output:
+                    for part in item.get("content", []):
+                        if part.get("type") == "output_text":
+                            output_text += part.get("text", "")
+                tokens = resp.get("usage", {}).get("output_tokens", 0)
+                _log(f"/v1/responses response: '{output_text[:80]}...' ({tokens} tokens)")
+                assert output_text or tokens > 0, f"/v1/responses: empty response for prompt: {prompt}"
+                assert tokens > 0, f"/v1/responses: no output tokens for prompt: {prompt}"
 
     def test_10_metrics_vllm(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """vLLM metrics should show successful requests."""

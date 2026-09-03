@@ -1,7 +1,8 @@
-"""OpenAI-compatible HTTP client for vLLM endpoints (httpx).
+"""HTTP client for vLLM endpoints (httpx).
 
-``LLMClient`` talks to ``/health``, ``/v1/models``, ``/v1/completions``, and
-``/v1/chat/completions``. Optional bearer token; TLS verify disabled for
+``LLMClient`` talks to ``/health``, ``/v1/models``, ``/v1/completions``,
+``/v1/chat/completions``, ``/v1/messages`` (Anthropic), and ``/v1/responses``
+(OpenAI Responses API). Optional bearer token; TLS verify disabled for
 self-signed pod certs.
 
 In conformance tests, two instances are used:
@@ -66,6 +67,36 @@ class LLMClient:
                 "model": model,
                 "messages": messages,
                 "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def messages(self, model: str, prompt: str | list[dict], max_tokens: int = 64, temperature: float = 0.1) -> dict:
+        """Anthropic /v1/messages endpoint."""
+        msgs = prompt if isinstance(prompt, list) else [{"role": "user", "content": prompt}]
+        r = self._client.post(
+            "/v1/messages",
+            headers={"anthropic-version": "2023-06-01"},
+            json={
+                "model": model,
+                "messages": msgs,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def responses(self, model: str, prompt: str, max_output_tokens: int = 64, temperature: float = 0.1) -> dict:
+        """OpenAI /v1/responses endpoint."""
+        r = self._client.post(
+            "/v1/responses",
+            json={
+                "model": model,
+                "input": prompt,
+                "max_output_tokens": max_output_tokens,
                 "temperature": temperature,
             },
         )
