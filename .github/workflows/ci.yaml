@@ -33,4 +33,4 @@ jobs:
           python-version: "3.11"
       - run: uv sync
       - run: uv run llm-d-e2e --setup main
-      - run: uv run pytest tests/test_smoke.py -v
+      - run: uv run pytest tests/ -v --ignore=tests/test_conformance.py

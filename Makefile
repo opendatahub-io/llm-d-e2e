@@ -159,8 +159,8 @@ test-profile-flow-control: ## Run flow control tests
 	uv run pytest $(PYTEST_ARGS) --profile configs/profiles/flow-control.yaml
 
 .PHONY: unittest
-unittest: ## Run smoke/unit tests (no cluster needed)
-	uv run pytest tests/test_smoke.py -v
+unittest: ## Run unit tests (no cluster needed)
+	uv run pytest tests/ -v --ignore=tests/test_conformance.py
 
 .PHONY: lint
 lint: ## Run ruff linter
