@@ -12,12 +12,13 @@ config, when the manifest is missing, or when deploy failed / discover mode):
   07. Health — GET /health returns 200 (direct pod; bypasses gateway EPP)
   08. Models — GET /v1/models lists base model (+ LoRA adapters if configured)
   09. Inference — chat/completions (+ LoRA adapter inference if configured)
-  10. Metrics (vLLM) — scrape workload pods; validate_vllm_basic
-  11. Metrics (cache) — prefix KV cache hits (vLLM + EPP; soft-fail in --mock)
-  12. Metrics (P/D) — prefill/decode token distribution
-  13. Metrics (scheduler) — EPP processed-request metrics
-  14. Metrics (flow control) — EPP dispatch activity
-  15. Metrics (LoRA) — adapter state on vLLM pods
+  10. Tool calling — chatPrompts with tools; validates tool_calls in response
+  11. Metrics (vLLM) — scrape workload pods; validate_vllm_basic
+  12. Metrics (cache) — prefix KV cache hits (vLLM + EPP; soft-fail in --mock)
+  13. Metrics (P/D) — prefill/decode token distribution
+  14. Metrics (scheduler) — EPP processed-request metrics
+  15. Metrics (flow control) — EPP dispatch activity
+  16. Metrics (LoRA) — adapter state on vLLM pods
   20. Benchmark — GuideLLM Job; optional warmup; performance thresholds
   21. Metrics (post-benchmark) — re-validate P/D after load
   99. Cleanup — delete LLMInferenceService (honors --nocleanup / tc.cleanup)
@@ -217,6 +218,8 @@ class TestConformance:
 
         if tc.validation.chat_prompts:
             for entry in tc.validation.chat_prompts:
+                if isinstance(entry, dict) and entry.get("tools"):
+                    continue
                 messages = chat_prompt_to_messages(entry)
                 assert messages, f"chatPrompts entry has no 'system' or 'user' key: {entry}"
                 _log(f"Sending chat prompt ({len(messages)} message(s)): '{messages[-1]['content'][:50]}...'")
@@ -242,7 +245,39 @@ class TestConformance:
                 resp = client.chat(model=adapter_name, prompt="Test LoRA adapter inference")
                 _assert_chat_response(resp, f"LoRA adapter: {adapter_name}")
 
-    def test_10_metrics_vllm(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
+    def test_10_tool_calling(self, client: LLMClient, tc: TestCase):
+        """Tool-calling: chatPrompts with tools should return structured tool_calls."""
+        if not tc.validation.inference_check:
+            pytest.skip("inference check disabled")
+        tool_entries = [e for e in (tc.validation.chat_prompts or []) if isinstance(e, dict) and e.get("tools")]
+        if not tool_entries:
+            pytest.skip("no tool-calling prompts configured")
+
+        for entry in tool_entries:
+            messages = chat_prompt_to_messages(entry)
+            tools = entry["tools"]
+            label = f"'{messages[-1]['content'][:50]}...'"
+            _log(f"Sending tool-call prompt ({len(tools)} tool(s)): {label}")
+
+            resp = client.chat(model=tc.model.name, prompt=messages, tools=tools, max_tokens=256)
+
+            choice = resp.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            tool_calls = message.get("tool_calls")
+            finish = choice.get("finish_reason")
+            tokens = resp.get("usage", {}).get("total_tokens", 0)
+            assert tokens > 0, f"No tokens generated for {label}"
+            assert tool_calls, (
+                f"Expected tool_calls for {label} but got none "
+                f"(finish_reason={finish}, content={str(message.get('content', ''))[:80]})"
+            )
+            called_names = [tc_item["function"]["name"] for tc_item in tool_calls]
+            _log(f"Tool calls: {called_names} (finish_reason={finish})")
+            defined_names = {t["function"]["name"] for t in tools if t.get("type") == "function"}
+            for name in called_names:
+                assert name in defined_names, f"Model called unknown tool '{name}', defined: {defined_names}"
+
+    def test_11_metrics_vllm(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """vLLM metrics should show successful requests."""
         _require_deployed(deployer, tc, test_mode)
         mc = tc.validation.metrics_check
@@ -258,7 +293,7 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"vLLM metric checks failed: {[c.message for c in failed]}"
 
-    def test_11_metrics_cache(
+    def test_12_metrics_cache(
         self, deployer: Deployer, scraper: Scraper, tc: TestCase, mock_mode: bool, test_mode: str
     ):
         """Prefix cache metrics should show hits."""
@@ -286,7 +321,7 @@ class TestConformance:
             failed = [c for c in checks if not c.passed]
             assert not failed, f"Cache metric checks failed: {[c.message for c in failed]}"
 
-    def test_12_metrics_pd(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str, request):
+    def test_13_metrics_pd(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str, request):
         """P/D metrics should show token distribution."""
         _require_deployed(deployer, tc, test_mode)
         mc = tc.validation.metrics_check
@@ -307,7 +342,7 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"P/D metric checks failed: {[c.message for c in failed]}"
 
-    def test_13_metrics_scheduler(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str, request):
+    def test_14_metrics_scheduler(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str, request):
         """Scheduler/EPP metrics should show processed requests."""
         _require_deployed(deployer, tc, test_mode)
         mc = tc.validation.metrics_check
@@ -328,7 +363,7 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"Scheduler metric checks failed: {[c.message for c in failed]}"
 
-    def test_14_metrics_flow_control(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
+    def test_15_metrics_flow_control(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """Flow control metrics should show dispatch activity."""
         _require_deployed(deployer, tc, test_mode)
         mc = tc.validation.metrics_check
@@ -345,7 +380,7 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"Flow control metric checks failed: {[c.message for c in failed]}"
 
-    def test_15_metrics_lora(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
+    def test_16_metrics_lora(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """LoRA metrics should show adapter state on vLLM pods."""
         _require_deployed(deployer, tc, test_mode)
         mc = tc.validation.metrics_check
@@ -361,7 +396,7 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"LoRA metric checks failed: {[c.message for c in failed]}"
 
-    def test_16_metrics_kvcache_offloading(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
+    def test_17_metrics_kvcache_offloading(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """KV-cache offloading metrics should show bytes offloaded on vLLM pods."""
         _require_deployed(deployer, tc, test_mode)
         mc = tc.validation.metrics_check
@@ -377,7 +412,7 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"KV-cache offloading metric checks failed: {[c.message for c in failed]}"
 
-    def test_17_kvcache_offloading_fs(self, deployer: Deployer, tc: TestCase, test_mode: str):
+    def test_18_kvcache_offloading_fs(self, deployer: Deployer, tc: TestCase, test_mode: str):
         _require_deployed(deployer, tc, test_mode)
         mc = tc.validation.metrics_check
         if not mc.enabled or not mc.check_kvcache_offloading_fs:

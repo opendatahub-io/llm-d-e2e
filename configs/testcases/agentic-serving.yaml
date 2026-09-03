@@ -1,0 +1,46 @@
+name: agentic-serving
+description: "Agentic serving with tool-calling (Qwen3-Coder-30B-A3B MoE), single GPU, 1 replica"
+model:
+  name: Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+  uri: hf://Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+  displayName: qwen3-coder-30b-agentic-serving
+  category: agentic-serving
+  cache:
+    enabled: true
+    storageSize: 100Gi
+    keepPVC: true
+    timeout: 30m
+deployment:
+  manifestPath: agentic-serving.yaml
+  requiresGpu: true
+  readyTimeout: 20m
+validation:
+  healthEndpoint: /health
+  healthPort: 8000
+  healthScheme: HTTPS
+  inferenceCheck: true
+  chatPrompts:
+    - system: "You are a helpful assistant with access to tools."
+      user: "What is the weather in San Francisco right now?"
+      tools:
+        - type: function
+          function:
+            name: get_weather
+            description: "Get the current weather for a given location"
+            parameters:
+              type: object
+              properties:
+                location:
+                  type: string
+                  description: "City and state, e.g. San Francisco, CA"
+              required:
+                - location
+  expectedCodes: [200]
+  timeout: 2m
+  retryAttempts: 3
+  retryInterval: 15s
+  metricsCheck:
+    enabled: true
+    checkVLLM: true
+    checkEPP: true
+cleanup: true

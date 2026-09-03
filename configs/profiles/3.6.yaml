@@ -11,5 +11,6 @@ testCases:
   - lora-multi
   - kv-offloading-cpu
   - kv-offloading-tiered
+  - agentic-serving
 parallel: false
 timeout: 180m

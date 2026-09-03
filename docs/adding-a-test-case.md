@@ -328,11 +328,12 @@ test_06_ready           — wait for Ready=True
 test_07_health          — GET /health (direct pod)
 test_08_models          — GET /v1/models (direct pod)
 test_09_inference       — POST /v1/chat/completions (via gateway)
-test_10_metrics_vllm    — vLLM request_success > 0
-test_11_metrics_cache   — prefix cache queries/hits
-test_12_metrics_pd      — P/D disaggregation metrics
-test_13_metrics_scheduler — EPP scheduler_e2e_count > 0
-test_14_metrics_flow_control — flow control dispatch/saturation
+test_10_tool_calling    — tool-calling: validates tool_calls in response
+test_11_metrics_vllm    — vLLM request_success > 0
+test_12_metrics_cache   — prefix cache queries/hits
+test_13_metrics_pd      — P/D disaggregation metrics
+test_14_metrics_scheduler — EPP scheduler_e2e_count > 0
+test_15_metrics_flow_control — flow control dispatch/saturation
 test_20_benchmark       — GuideLLM performance benchmark
 test_21_metrics_post_benchmark — metrics after benchmark
 test_99_cleanup         — delete LLMInferenceService
@@ -340,7 +341,7 @@ test_99_cleanup         — delete LLMInferenceService
 
 ### How to add a new phase
 
-1. Pick a number between existing phases (e.g. `test_15` for a new metrics check after flow control).
+1. Pick a number between existing phases (e.g. `test_16` for a new metrics check after flow control).
 
 2. Add the method to `TestConformance` in `tests/test_conformance.py`:
 

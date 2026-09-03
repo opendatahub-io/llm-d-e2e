@@ -20,7 +20,7 @@ uv sync                                              # install dependencies
 uv run llm-d-e2e --setup main                        # clone test manifests (latest)
 uv run llm-d-e2e --setup 3.5-GA                      # clone manifests (specific branch)
 
-uv run pytest tests/test_smoke.py -v                  # unit tests (no cluster needed)
+uv run pytest tests/ -v --ignore=tests/test_conformance.py  # unit tests (no cluster needed)
 uv run ruff check src/ tests/                         # lint
 uv run ruff format src/ tests/                        # format
 
@@ -75,12 +75,13 @@ The `--mode` flag controls which phases execute:
 | 07 | `test_07_health` | GET /health (direct pod, bypasses EPP) |
 | 08 | `test_08_models` | GET /v1/models (direct pod, + LoRA adapters if configured) |
 | 09 | `test_09_inference` | Chat completions + completions (+ LoRA adapter inference) |
-| 10 | `test_10_metrics_vllm` | Basic vLLM request success metrics |
-| 11 | `test_11_metrics_cache` | Prefix KV cache hit metrics |
-| 12 | `test_12_metrics_pd` | P/D token distribution + NIXL transfer metrics |
-| 13 | `test_13_metrics_scheduler` | EPP/scheduler processed request metrics |
-| 14 | `test_14_metrics_flow_control` | Flow control dispatch activity metrics |
-| 15 | `test_15_metrics_lora` | LoRA adapter state metrics (`vllm:lora_requests_info`) |
+| 10 | `test_10_tool_calling` | Tool-calling: chatPrompts with tools, validates tool_calls response |
+| 11 | `test_11_metrics_vllm` | Basic vLLM request success metrics |
+| 12 | `test_12_metrics_cache` | Prefix KV cache hit metrics |
+| 13 | `test_13_metrics_pd` | P/D token distribution + NIXL transfer metrics |
+| 14 | `test_14_metrics_scheduler` | EPP/scheduler processed request metrics |
+| 15 | `test_15_metrics_flow_control` | Flow control dispatch activity metrics |
+| 16 | `test_16_metrics_lora` | LoRA adapter state metrics (`vllm:lora_requests_info`) |
 | 20 | `test_20_benchmark` | GuideLLM benchmark with performance thresholds |
 | 21 | `test_21_metrics_post_benchmark` | P/D metrics after benchmark load |
 | 99 | `test_99_cleanup` | Delete LLMInferenceService |
@@ -213,7 +214,7 @@ As of [odh-gitops PR#156](https://github.com/opendatahub-io/odh-gitops/pull/156)
 
 GitHub Actions (`.github/workflows/ci.yaml`) runs on push/PR to `main`:
 1. **lint-and-format** — `ruff check` + `ruff format --check`
-2. **smoke-tests** — clones manifests, runs `pytest tests/test_smoke.py`
+2. **smoke-tests** — clones manifests, runs unit tests (`pytest tests/ --ignore=tests/test_conformance.py`)
 
 No cluster integration tests run in CI.
 
