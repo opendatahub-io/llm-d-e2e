@@ -123,8 +123,10 @@ cleanup: true
 | `deployment.readyTimeout` | How long to wait for Ready=True (string: `10m`, `2h`) |
 | `deployment.resources.gpus` | GPU count per replica (stripped in `--mock` mode) |
 | `deployment.requiresGpu` | If `true`, the test case is **skipped unless `--need-gpu` is passed** (see [GPU Gate](#gpu-gate)) |
-| `validation.testPrompts` | Prompts sent to `/v1/chat/completions` |
+| `validation.testPrompts` | Prompts sent to `/v1/chat/completions`, `/v1/completions`, `/v1/messages`, `/v1/responses` |
 | `validation.chatPrompts` | Alternative: structured `[{system, user}]` prompts for prefix cache testing |
+| `validation.checkMessages` | Enable Anthropic `/v1/messages` inference check (default: `false`) |
+| `validation.checkResponses` | Enable OpenAI `/v1/responses` inference check (default: `false`) |
 | `cleanup` | Delete the LLMInferenceService after tests complete |
 
 ### Adding metrics checks
@@ -327,7 +329,8 @@ test_05_pods            — wait for pods Running
 test_06_ready           — wait for Ready=True
 test_07_health          — GET /health (direct pod)
 test_08_models          — GET /v1/models (direct pod)
-test_09_inference       — POST /v1/chat/completions (via gateway)
+test_09a_inference      — POST /v1/chat/completions + /v1/completions (via gateway)
+test_09b_messages_responses — Anthropic /v1/messages + OpenAI /v1/responses
 test_10_metrics_vllm    — vLLM request_success > 0
 test_11_metrics_cache   — prefix cache queries/hits
 test_12_metrics_pd      — P/D disaggregation metrics

@@ -990,6 +990,71 @@ def test_chat_list_prompt_passes_through(monkeypatch):
     c.close()
 
 
+def test_messages_string_prompt_wraps_as_user_message(monkeypatch):
+    """messages() should wrap a string as a user message and include anthropic-version header."""
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        captured["json"] = json
+        captured["headers"] = headers
+
+        class FakeResp:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"content": [{"type": "text", "text": "ok"}], "usage": {"input_tokens": 5, "output_tokens": 1}}
+
+        return FakeResp()
+
+    c = LLMClient(base_url="http://localhost:8000")
+    monkeypatch.setattr(c._client, "post", fake_post)
+    resp = c.messages(model="test-model", prompt="hello")
+    assert captured["json"]["messages"] == [{"role": "user", "content": "hello"}]
+    assert captured["json"]["model"] == "test-model"
+    assert captured["headers"]["anthropic-version"] == "2023-06-01"
+    assert "max_tokens" in captured["json"]
+    assert resp["content"][0]["text"] == "ok"
+    assert resp["usage"]["output_tokens"] == 1
+    c.close()
+
+
+def test_responses_prompt_sends_as_input(monkeypatch):
+    """responses() should send input and max_output_tokens in the request body."""
+    captured = {}
+
+    def fake_post(url, json=None, **kwargs):
+        captured["url"] = url
+        captured["json"] = json
+
+        class FakeResp:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {
+                    "output": [{"content": [{"type": "output_text", "text": "ok"}]}],
+                    "usage": {"output_tokens": 1},
+                }
+
+        return FakeResp()
+
+    c = LLMClient(base_url="http://localhost:8000")
+    monkeypatch.setattr(c._client, "post", fake_post)
+    resp = c.responses(model="test-model", prompt="hello")
+    assert captured["json"]["input"] == "hello"
+    assert captured["json"]["model"] == "test-model"
+    assert "max_output_tokens" in captured["json"]
+    assert "messages" not in captured["json"]
+    assert resp["output"][0]["content"][0]["text"] == "ok"
+    assert resp["usage"]["output_tokens"] == 1
+    c.close()
+
+
 def test_env_overrides_applied_to_decode_and_prefill():
     """_patch_manifest should inject env_overrides into main containers of both templates."""
     import yaml

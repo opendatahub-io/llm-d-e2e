@@ -29,6 +29,8 @@ validation:
   timeout: 2m
   retryAttempts: 3
   retryInterval: 15s
+  checkMessages: true
+  checkResponses: true
   metricsCheck:
     enabled: true
     checkVLLM: true
