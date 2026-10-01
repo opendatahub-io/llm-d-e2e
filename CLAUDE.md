@@ -235,3 +235,17 @@ No cluster integration tests run in CI.
 - Ruff for linting and formatting, line length 120, target Python 3.11.
 - Uses `from __future__ import annotations` throughout.
 - Config types are plain dataclasses (no Pydantic).
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked as GitHub issues using `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use the single-context layout with root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
