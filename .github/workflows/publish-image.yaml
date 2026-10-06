@@ -3,7 +3,6 @@ name: Build and publish image
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       manifest_ref:
