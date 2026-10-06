@@ -10,11 +10,7 @@ on:
         description: Manifest repository branch to bake into the image
         required: true
         default: main
-        type: choice
-        options:
-          - main
-          - 3.5-GA
-          - 3.4-stable
+        type: string
 
 jobs:
   build-and-publish:
@@ -32,13 +28,10 @@ jobs:
         env:
           MANIFEST_REF: ${{ inputs.manifest_ref || 'main' }}
         run: |
-          case "$MANIFEST_REF" in
-            main|3.5-GA|3.4-stable) ;;
-            *)
-              echo "::error::Unsupported manifest branch; choose main, 3.5-GA, or 3.4-stable"
-              exit 1
-              ;;
-          esac
+          if ! git check-ref-format --branch "$MANIFEST_REF" >/dev/null; then
+            echo "::error::manifest_ref must be a valid Git branch name"
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
