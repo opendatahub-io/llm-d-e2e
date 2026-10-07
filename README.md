@@ -130,7 +130,7 @@ This skips the deploy and cleanup phases — only runs health, models, inference
 
 ## Container Image
 
-The test suite is available as a container image at `quay.io/opendatahub/llm-d-e2e`.
+The test suite is available as a container image at `ghcr.io/opendatahub-io/llm-d-e2e`.
 
 ### Build
 
@@ -148,21 +148,21 @@ docker build --build-arg MANIFEST_REF=3.5-GA -t llm-d-e2e:3.5 .
 # Run with baked-in manifests
 docker run --rm \
   -v ~/.kube:/root/.kube:z \
-  quay.io/opendatahub/llm-d-e2e \
+  ghcr.io/opendatahub-io/llm-d-e2e \
   -t single-gpu-smoke --mock -v
 
 # Use a non-default kubeconfig
 docker run --rm \
   -e KUBECONFIG=/root/.kube/my-cluster \
   -v ~/.kube:/root/.kube:z \
-  quay.io/opendatahub/llm-d-e2e \
+  ghcr.io/opendatahub-io/llm-d-e2e \
   -t single-gpu-smoke,single-gpu,cache-aware --mock -v
 
 # Setup different manifests and run tests in one command
 docker run --rm \
   -e KUBECONFIG=/root/.kube/my-cluster \
   -v ~/.kube:/root/.kube:z \
-  quay.io/opendatahub/llm-d-e2e \
+  ghcr.io/opendatahub-io/llm-d-e2e \
   --setup 3.5-GA \
   -t cache-aware,flow-control,flow-control-tokens --mock -v
 
@@ -171,7 +171,7 @@ docker run --rm \
   -e KUBECONFIG=/root/.kube/my-cluster \
   -v ~/.kube:/root/.kube:z \
   -v $(pwd)/reports:/app/reports:z \
-  quay.io/opendatahub/llm-d-e2e \
+  ghcr.io/opendatahub-io/llm-d-e2e \
   -t single-gpu-smoke --mock --html reports/mock-ci.html -v
 ```
 
@@ -179,11 +179,11 @@ docker run --rm \
 
 ```bash
 # List available branches and pick one (requires -it for interactive prompt)
-docker run --rm -it quay.io/opendatahub/llm-d-e2e --setup
+docker run --rm -it ghcr.io/opendatahub-io/llm-d-e2e --setup
 
 # Direct — no prompt
-docker run --rm quay.io/opendatahub/llm-d-e2e --setup 3.5-GA
-docker run --rm quay.io/opendatahub/llm-d-e2e --setup 3.4-stable
+docker run --rm ghcr.io/opendatahub-io/llm-d-e2e --setup 3.5-GA
+docker run --rm ghcr.io/opendatahub-io/llm-d-e2e --setup 3.4-stable
 ```
 
 ### Interactive mode
@@ -194,7 +194,7 @@ docker run --rm -it \
   -e KUBECONFIG=/root/.kube/my-cluster \
   -v ~/.kube:/root/.kube:z \
   -v $(pwd)/reports:/app/reports:z \
-  --entrypoint bash quay.io/opendatahub/llm-d-e2e
+  --entrypoint bash ghcr.io/opendatahub-io/llm-d-e2e
 
 # Inside the container:
 uv run llm-d-e2e --setup              # interactive branch selection
@@ -207,13 +207,13 @@ uv run llm-d-e2e -t cache-aware --mock --html reports/cache.html -v
 
 ```bash
 # List test cases
-docker run --rm quay.io/opendatahub/llm-d-e2e --list-testcases
+docker run --rm ghcr.io/opendatahub-io/llm-d-e2e --list-testcases
 
 # List profiles
-docker run --rm quay.io/opendatahub/llm-d-e2e --list-profiles
+docker run --rm ghcr.io/opendatahub-io/llm-d-e2e --list-profiles
 
 # Setup only (clone manifests, show test case mapping)
-docker run --rm quay.io/opendatahub/llm-d-e2e --setup 3.5-GA
+docker run --rm ghcr.io/opendatahub-io/llm-d-e2e --setup 3.5-GA
 ```
 
 ### How manifests work in the container
