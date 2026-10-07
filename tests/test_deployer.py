@@ -366,7 +366,7 @@ spec: {}
             deleted_services.append(args[2])
         return ""
 
-    def failing_apply(path):
+    def failing_apply(path, namespace=""):
         raise RuntimeError("admission webhook denied service-b")
 
     monkeypatch.setattr(deployer, "kubectl", fake_kubectl)
@@ -385,6 +385,120 @@ spec: {}
 
     assert deleted_services == ["case", "service-b"]
     assert not deployer.needs_cleanup(tc.name)
+
+
+def _record_applies(deployer, monkeypatch) -> list[tuple[str, list[dict]]]:
+    """Stub cluster calls; record each ``kubectl apply`` as (namespace, documents)."""
+    import yaml
+
+    applies = []
+
+    def fake_kubectl(*args, **kwargs):
+        if args[0] == "apply":
+            applies.append((args[2], list(yaml.safe_load_all(Path(args[4]).read_text()))))
+        return ""
+
+    monkeypatch.setattr(deployer, "kubectl", fake_kubectl)
+    monkeypatch.setattr(deployer, "ensure_namespace", lambda: None)
+    monkeypatch.setattr(deployer, "_ensure_clean_slate", lambda name: None)
+    monkeypatch.setattr(deployer, "ensure_metrics_rbac", lambda name: None)
+    return applies
+
+
+def test_single_namespace_manifest_is_one_apply_into_test_namespace(tmp_path, monkeypatch):
+    """Manifests without declared namespaces (every llm-d testcase) apply exactly as before."""
+    from conformance.deployer import Deployer
+
+    (tmp_path / "multi.yaml").write_text(
+        "apiVersion: serving.kserve.io/v1alpha2\nkind: LLMInferenceService\nmetadata:\n  name: a\nspec: {}\n"
+        "---\n"
+        "apiVersion: serving.kserve.io/v1alpha2\nkind: LLMInferenceService\nmetadata:\n  name: b\nspec: {}\n"
+    )
+    tc = load_testcase("configs/testcases/lora-single.yaml")
+    tc.name = "case"
+    tc.deployment.manifest_path = "multi.yaml"
+    deployer = Deployer(manifest_dir=str(tmp_path), namespace="llm-conformance-test")
+    applies = _record_applies(deployer, monkeypatch)
+
+    assert deployer.deploy(tc).success
+
+    assert [(ns, [doc["metadata"]["name"] for doc in docs]) for ns, docs in applies] == [
+        ("llm-conformance-test", ["case", "b"])
+    ]
+
+
+_MAAS_MANIFEST = """apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceService
+metadata:
+  name: maas-single-gpu
+spec: {}
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSModelRef
+metadata:
+  name: maas-single-gpu
+spec:
+  modelRef:
+    kind: LLMInferenceService
+    name: maas-single-gpu
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSAuthPolicy
+metadata:
+  name: maas-single-gpu-auth
+  namespace: models-as-a-service
+spec:
+  modelRefs:
+  - name: maas-single-gpu
+    namespace: llm-conformance-test
+"""
+
+
+def test_cross_namespace_documents_apply_into_their_namespace_and_follow_overrides(tmp_path, monkeypatch):
+    """MaaS policies live in models-as-a-service; refs follow the testcase name and --namespace."""
+    from conformance.deployer import Deployer
+
+    (tmp_path / "maas.yaml").write_text(_MAAS_MANIFEST)
+    tc = load_testcase("configs/testcases/single-gpu.yaml")
+    tc.name = "renamed"
+    tc.deployment.manifest_path = "maas.yaml"
+    deployer = Deployer(manifest_dir=str(tmp_path), namespace="team-ns")
+    applies = _record_applies(deployer, monkeypatch)
+
+    assert deployer.deploy(tc).success
+
+    assert [(ns, [doc["kind"] for doc in docs]) for ns, docs in applies] == [
+        ("team-ns", ["LLMInferenceService", "MaaSModelRef"]),
+        ("models-as-a-service", ["MaaSAuthPolicy"]),
+    ]
+    assert applies[0][1][1]["spec"]["modelRef"]["name"] == "renamed"
+    assert applies[1][1][0]["spec"]["modelRefs"] == [{"name": "maas-single-gpu", "namespace": "team-ns"}]
+
+
+def test_cleanup_deletes_companion_documents_before_services(tmp_path, monkeypatch):
+    from conformance.deployer import Deployer
+
+    (tmp_path / "maas.yaml").write_text(_MAAS_MANIFEST)
+    tc = load_testcase("configs/testcases/single-gpu.yaml")
+    tc.deployment.manifest_path = "maas.yaml"
+    deployer = Deployer(manifest_dir=str(tmp_path), namespace="llm-conformance-test")
+    deletes = []
+
+    def fake_kubectl(*args, **kwargs):
+        if args[0] == "delete":
+            deletes.append((args[1], args[2], args[4]))
+        return ""
+
+    monkeypatch.setattr(deployer, "kubectl", fake_kubectl)
+    monkeypatch.setattr(deployer, "cleanup_metrics_rbac", lambda name: None)
+
+    deployer.cleanup(tc, timeout=1)
+
+    assert deletes == [
+        ("maasauthpolicy", "maas-single-gpu-auth", "models-as-a-service"),
+        ("maasmodelref", "maas-single-gpu", "llm-conformance-test"),
+        ("llminferenceservice", tc.name, "llm-conformance-test"),
+    ]
 
 
 def test_deploy_failure_before_apply_needs_no_cleanup(tmp_path, monkeypatch):

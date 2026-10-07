@@ -1,0 +1,43 @@
+name: maas-single-gpu
+description: "single-gpu served through MaaS: llm-d inference checks, then MaaS auth, API key, and rate limit"
+model:
+  name: Qwen/Qwen3-0.6B
+  uri: hf://Qwen/Qwen3-0.6B
+  displayName: qwen3-0.6b-maas-single-gpu
+  category: single-node-gpu
+  cache:
+    enabled: true
+    storageSize: 10Gi
+    keepPVC: true
+    timeout: 15m
+deployment:
+  # LLMInferenceService bound to inference-gateway and maas-default-gateway,
+  # plus its MaaSModelRef, MaaSAuthPolicy, and MaaSSubscription.
+  manifestPath: maas-single-gpu.yaml
+  readyTimeout: 15m
+  resources:
+    cpu: "4"
+    memory: 32Gi
+    rdma: false
+validation:
+  healthEndpoint: /health
+  healthPort: 8000
+  healthScheme: HTTPS
+  inferenceCheck: true
+  testPrompts:
+    - "What is Kubernetes?"
+    - "Explain containerization."
+  expectedCodes: [200]
+  timeout: 2m
+  retryAttempts: 3
+  retryInterval: 15s
+  checkMessages: true
+  checkResponses: true
+  metricsCheck:
+    enabled: true
+    checkVLLM: true
+    checkScheduler: true
+  maas:
+    # xKS/AKS: the MaaS gateway's port 443 is blocked externally; use its HTTP listener.
+    endpointScheme: http
+cleanup: true

@@ -22,6 +22,7 @@ config, when the manifest is missing, or when deploy failed / discover mode):
   15. Metrics (LoRA) — adapter state on vLLM pods
   20. Benchmark — GuideLLM Job; optional warmup; performance thresholds
   21. Metrics (post-benchmark) — re-validate P/D after load
+  30a-e. MaaS — governed route checks (tests/maas/phases.py; skip without a MaaSModelRef)
   99. Cleanup — delete LLMInferenceService (honors --nocleanup / tc.cleanup)
 """
 
@@ -49,6 +50,7 @@ from conformance.metrics import (
     validate_scheduler,
     validate_vllm_basic,
 )
+from maas.phases import MaaSPhases
 
 LLMISVC_CRD = "llminferenceservices.serving.kserve.io"
 _MANIFEST_DIR = Path(__file__).resolve().parent.parent / "deploy" / "manifests"
@@ -92,6 +94,15 @@ def _require_gpu(deployer: Deployer, tc: TestCase, mock_mode: bool, test_mode: s
         pytest.skip(f"'{tc.name}' needs {needed} GPU(s) but cluster has {available}")
 
 
+def _metric(flag: str):
+    """Phase applies when metrics checks are enabled and ``flag`` is set on ``metricsCheck``."""
+    return lambda tc: tc.validation.metrics_check.enabled and getattr(tc.validation.metrics_check, flag)
+
+
+def _tool_prompts(tc: TestCase) -> list[dict]:
+    return [e for e in (tc.validation.chat_prompts or []) if isinstance(e, dict) and e.get("tools")]
+
+
 def _check_threshold(name: str, value: float, min_value: float | None = None, max_value: float | None = None) -> bool:
     passed = True
     if min_value is not None and value < min_value:
@@ -105,8 +116,8 @@ def _check_threshold(name: str, value: float, min_value: float | None = None, ma
     return passed
 
 
-class TestConformance:
-    """Ordered conformance phases for each test case."""
+class LLMDPhases:
+    """Ordered llm-d conformance phases for each test case."""
 
     def test_01_prereq(self, deployer: Deployer, tc: TestCase, mock_mode: bool, test_mode: str):
         """LLMInferenceService CRD must be installed and manifest must exist."""
@@ -206,10 +217,9 @@ class TestConformance:
                 assert name in models, f"LoRA adapter {name!r} not in /v1/models, got {models}"
             _log(f"All {len(tc.model.lora.adapters)} LoRA adapter(s) registered")
 
+    @pytest.mark.applies_when.with_args(lambda tc: tc.validation.inference_check)
     def test_09a_inference(self, client: LLMClient, tc: TestCase):
         """Inference via /v1/chat/completions and /v1/completions."""
-        if not tc.validation.inference_check:
-            pytest.skip("inference check disabled")
 
         def _assert_chat_response(resp: dict, label: str):
             choices = resp.get("choices", [])
@@ -257,10 +267,9 @@ class TestConformance:
                 resp = client.chat(model=adapter_name, prompt="Test LoRA adapter inference")
                 _assert_chat_response(resp, f"LoRA adapter: {adapter_name}")
 
+    @pytest.mark.applies_when.with_args(lambda tc: tc.validation.check_messages or tc.validation.check_responses)
     def test_09b_messages_responses(self, client: LLMClient, tc: TestCase):
         """Inference via Anthropic /v1/messages and OpenAI /v1/responses."""
-        if not tc.validation.check_messages and not tc.validation.check_responses:
-            pytest.skip("/v1/messages and /v1/responses checks disabled")
 
         plain_prompts = tc.validation.test_prompts or ["What is 3+3?"]
 
@@ -295,13 +304,10 @@ class TestConformance:
                 assert output_text or tokens > 0, f"/v1/responses: empty response for prompt: {prompt}"
                 assert tokens > 0, f"/v1/responses: no output tokens for prompt: {prompt}"
 
+    @pytest.mark.applies_when.with_args(lambda tc: tc.validation.inference_check and _tool_prompts(tc))
     def test_09c_tool_calling(self, client: LLMClient, tc: TestCase):
         """Tool-calling: chatPrompts with tools should return structured tool_calls."""
-        if not tc.validation.inference_check:
-            pytest.skip("inference check disabled")
-        tool_entries = [e for e in (tc.validation.chat_prompts or []) if isinstance(e, dict) and e.get("tools")]
-        if not tool_entries:
-            pytest.skip("no tool-calling prompts configured")
+        tool_entries = _tool_prompts(tc)
 
         for entry in tool_entries:
             messages = chat_prompt_to_messages(entry)
@@ -359,12 +365,10 @@ class TestConformance:
                 empty = [key for key in required if isinstance(arguments[key], str) and not arguments[key].strip()]
                 assert not empty, f"Tool '{name}' has empty required arguments: {empty}"
 
+    @pytest.mark.applies_when.with_args(_metric("check_vllm"))
     def test_10_metrics_vllm(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """vLLM metrics should show successful requests."""
         _require_deployed(deployer, tc, test_mode)
-        mc = tc.validation.metrics_check
-        if not mc.enabled or not mc.check_vllm:
-            pytest.skip("vLLM metrics check disabled")
         _log("Scraping vLLM metrics...")
         results = scraper.scrape_vllm(tc.name)
         _log(f"Scraped {len(results)} pod(s)")
@@ -375,14 +379,12 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"vLLM metric checks failed: {[c.message for c in failed]}"
 
+    @pytest.mark.applies_when.with_args(_metric("check_prefix_cache"))
     def test_11_metrics_cache(
         self, deployer: Deployer, scraper: Scraper, tc: TestCase, mock_mode: bool, test_mode: str
     ):
         """Prefix cache metrics should show hits."""
         _require_deployed(deployer, tc, test_mode)
-        mc = tc.validation.metrics_check
-        if not mc.enabled or not mc.check_prefix_cache:
-            pytest.skip("prefix cache check disabled")
         deployer.ensure_metrics_rbac(tc.name)
         _log("Scraping cache-aware metrics...")
         vllm = scraper.scrape_vllm(tc.name)
@@ -403,12 +405,10 @@ class TestConformance:
             failed = [c for c in checks if not c.passed]
             assert not failed, f"Cache metric checks failed: {[c.message for c in failed]}"
 
+    @pytest.mark.applies_when.with_args(_metric("check_pd"))
     def test_12_metrics_pd(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str, request):
         """P/D metrics should show token distribution."""
         _require_deployed(deployer, tc, test_mode)
-        mc = tc.validation.metrics_check
-        if not mc.enabled or not mc.check_pd:
-            pytest.skip("P/D metrics check disabled")
         _log("Scraping P/D metrics...")
         vllm = scraper.scrape_vllm(tc.name)
         prefill = scraper.scrape_prefill(tc.name)
@@ -424,12 +424,10 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"P/D metric checks failed: {[c.message for c in failed]}"
 
+    @pytest.mark.applies_when.with_args(_metric("check_scheduler"))
     def test_13_metrics_scheduler(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str, request):
         """Scheduler/EPP metrics should show processed requests."""
         _require_deployed(deployer, tc, test_mode)
-        mc = tc.validation.metrics_check
-        if not mc.enabled or not mc.check_scheduler:
-            pytest.skip("scheduler metrics check disabled")
         deployer.ensure_metrics_rbac(tc.name)
         _log("Scraping scheduler/EPP metrics...")
         epp = scraper.scrape_epp(tc.name)
@@ -445,12 +443,10 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"Scheduler metric checks failed: {[c.message for c in failed]}"
 
+    @pytest.mark.applies_when.with_args(_metric("check_flow_control"))
     def test_14_metrics_flow_control(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """Flow control metrics should show dispatch activity."""
         _require_deployed(deployer, tc, test_mode)
-        mc = tc.validation.metrics_check
-        if not mc.enabled or not mc.check_flow_control:
-            pytest.skip("flow control metrics check disabled")
         deployer.ensure_metrics_rbac(tc.name)
         _log("Scraping flow control metrics...")
         epp = scraper.scrape_epp(tc.name)
@@ -462,12 +458,10 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"Flow control metric checks failed: {[c.message for c in failed]}"
 
+    @pytest.mark.applies_when.with_args(_metric("check_lora"))
     def test_15_metrics_lora(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """LoRA metrics should show adapter state on vLLM pods."""
         _require_deployed(deployer, tc, test_mode)
-        mc = tc.validation.metrics_check
-        if not mc.enabled or not mc.check_lora:
-            pytest.skip("LoRA metrics check disabled")
         _log("Scraping LoRA metrics from vLLM pods...")
         vllm = scraper.scrape_vllm(tc.name)
         _log(f"Scraped {len(vllm)} pod(s)")
@@ -478,12 +472,10 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"LoRA metric checks failed: {[c.message for c in failed]}"
 
+    @pytest.mark.applies_when.with_args(_metric("check_kvcache_offloading"))
     def test_16_metrics_kvcache_offloading(self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str):
         """KV-cache offloading metrics should show bytes offloaded on vLLM pods."""
         _require_deployed(deployer, tc, test_mode)
-        mc = tc.validation.metrics_check
-        if not mc.enabled or not mc.check_kvcache_offloading:
-            pytest.skip("KV-cache offloading metrics check disabled")
         _log("Scraping KV-cache offloading metrics from vLLM pods...")
         vllm = scraper.scrape_vllm(tc.name)
         _log(f"Scraped {len(vllm)} pod(s)")
@@ -494,11 +486,9 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"KV-cache offloading metric checks failed: {[c.message for c in failed]}"
 
+    @pytest.mark.applies_when.with_args(_metric("check_kvcache_offloading_fs"))
     def test_17_kvcache_offloading_fs(self, deployer: Deployer, tc: TestCase, test_mode: str):
         _require_deployed(deployer, tc, test_mode)
-        mc = tc.validation.metrics_check
-        if not mc.enabled or not mc.check_kvcache_offloading_fs:
-            pytest.skip("KV-cache filesystem offloading check disabled")
         path = tc.validation.kv_offload_fs_path
         pods = deployer.list_workload_pods(tc.name)
         assert pods, f"No workload pods found for '{tc.name}'"
@@ -510,12 +500,11 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"KV-cache FS offload checks failed: {[c.message for c in failed]}"
 
+    @pytest.mark.applies_when.with_args(lambda tc: tc.validation.benchmark.enabled)
     def test_20_benchmark(self, deployer: Deployer, tc: TestCase, test_mode: str, guidellm_image: str):
         """Run GuideLLM benchmark and check performance thresholds."""
         _require_deployed(deployer, tc, test_mode)
         bc = tc.validation.benchmark
-        if not bc.enabled:
-            pytest.skip("benchmark disabled")
 
         gateway_addr = deployer.wait_for_gateway(timeout=60)
         target_url = f"http://{gateway_addr}/{deployer.namespace}/{tc.name}"
@@ -584,15 +573,12 @@ class TestConformance:
             failures.append(f"failed ratio={failed_ratio:.4f} > {t.max_failed_ratio}")
         assert not failures, f"Performance thresholds breached: {'; '.join(failures)}"
 
+    @pytest.mark.applies_when.with_args(lambda tc: _metric("check_pd")(tc) and tc.validation.benchmark.enabled)
     def test_21_metrics_post_benchmark(
         self, deployer: Deployer, scraper: Scraper, tc: TestCase, test_mode: str, request
     ):
         """Scrape and validate P/D metrics after benchmark run."""
         _require_deployed(deployer, tc, test_mode)
-        mc = tc.validation.metrics_check
-        bc = tc.validation.benchmark
-        if not mc.enabled or not mc.check_pd or not bc.enabled:
-            pytest.skip("P/D post-benchmark metrics check disabled")
         _log("Scraping post-benchmark P/D metrics...")
         decode = scraper.scrape_vllm(tc.name)
         prefill = scraper.scrape_prefill(tc.name)
@@ -610,14 +596,25 @@ class TestConformance:
         failed = [c for c in checks if not c.passed]
         assert not failed, f"Post-benchmark P/D metric checks failed: {[c.message for c in failed]}"
 
+
+class CleanupPhase:
+    """Final phase, collected after every other phase group."""
+
+    @pytest.mark.applies_when.with_args(lambda tc: tc.cleanup)
     def test_99_cleanup(self, deployer: Deployer, tc: TestCase, no_cleanup: bool, test_mode: str):
         """Clean up deployed resources."""
         if no_cleanup:
             pytest.skip("--nocleanup set")
-        if not tc.cleanup:
-            pytest.skip("cleanup disabled in test case config")
         if test_mode != "discover" and not deployer.needs_cleanup(tc.name):
             pytest.skip(f"nothing to clean up — no manifest was applied for '{tc.name}'")
         _log(f"Cleaning up '{tc.name}'...")
         deployer.cleanup(tc)
         _log("Cleanup complete")
+
+
+class TestConformance(CleanupPhase, MaaSPhases, LLMDPhases):
+    """Every phase for each test case.
+
+    pytest collects inherited test methods in reverse-MRO order, so the phase
+    groups run llm-d (01–21), then MaaS (30a–30e), then cleanup (99).
+    """

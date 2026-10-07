@@ -104,6 +104,9 @@ _do-setup:
 		fi; \
 	done
 
+# Dry-run with a default (not -n) namespace: documents without one land in $(NAMESPACE),
+# as the deployer applies them, and cross-namespace documents (e.g. MaaS policies) keep
+# their own. Manifests whose kinds the cluster lacks (e.g. MaaS) are reported as skipped.
 .PHONY: validate-manifests
 validate-manifests: ## Validate all manifests against the cluster CRD (dry-run)
 	@if [ ! -d $(MANIFEST_DIR) ] || [ -z "$$(ls $(MANIFEST_DIR)/*.yaml 2>/dev/null)" ]; then \
@@ -113,13 +116,20 @@ validate-manifests: ## Validate all manifests against the cluster CRD (dry-run)
 	@FAIL=0; \
 	kubectl --kubeconfig $(KUBECONFIG) get namespace $(NAMESPACE) >/dev/null 2>&1 || \
 		kubectl --kubeconfig $(KUBECONFIG) create namespace $(NAMESPACE) >/dev/null 2>&1; \
+	KC=$$(mktemp); trap 'rm -f $$KC' EXIT; \
+	kubectl --kubeconfig $(KUBECONFIG) config view --raw --minify --flatten > $$KC; \
+	kubectl --kubeconfig $$KC config set-context --current --namespace=$(NAMESPACE) >/dev/null; \
 	for f in $(MANIFEST_DIR)/*.yaml; do \
 		name=$$(basename $$f); \
-		if kubectl --kubeconfig $(KUBECONFIG) apply --dry-run=server -n $(NAMESPACE) -f $$f >/dev/null 2>&1; then \
+		out=$$(kubectl --kubeconfig $$KC apply --dry-run=server -f $$f 2>&1); \
+		if [ $$? -eq 0 ]; then \
 			printf "  \033[32m✓\033[0m %s\n" "$$name"; \
+		elif echo "$$out" | grep -q "no matches for kind"; then \
+			printf "  \033[33m⊘\033[0m %s (skipped: %s not installed on this cluster)\n" "$$name" \
+				"$$(echo "$$out" | grep -o 'kind "[^"]*"' | head -1)"; \
 		else \
 			printf "  \033[31m✗\033[0m %s\n" "$$name"; \
-			kubectl --kubeconfig $(KUBECONFIG) apply --dry-run=server -n $(NAMESPACE) -f $$f 2>&1 | sed 's/^/    /'; \
+			echo "$$out" | sed 's/^/    /'; \
 			FAIL=1; \
 		fi; \
 	done; \

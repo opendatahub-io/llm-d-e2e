@@ -61,6 +61,7 @@ Enable only what the topology proves:
 | `lora-single` / `lora-multi` | LoRA adapter registration + inference |
 | `moe` | MoE with DP/EP |
 | `multi-pool` | Multiple InferencePools |
+| `maas-single-gpu` | single-gpu through MaaS (auth, API key, rate limit); `validation.maas.endpointScheme` |
 
 Exact descriptions are in each file’s `description` field.
 

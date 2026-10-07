@@ -42,6 +42,7 @@ from conformance.config import (
     llmisvc_manifest_documents,
     load_manifest_documents,
 )
+from conformance.maas import patch_maas_refs
 
 log = logging.getLogger(__name__)
 
@@ -528,7 +529,9 @@ class Deployer:
     def _is_transient_apply_error(cls, error: str) -> bool:
         return cls._is_webhook_not_ready_error(error) or cls._is_crd_not_registered_error(error)
 
-    def _apply_with_webhook_retry(self, tmp_path: str, timeout: float = 120, interval: float = 10) -> None:
+    def _apply_with_webhook_retry(
+        self, tmp_path: str, timeout: float = 120, interval: float = 10, namespace: str = ""
+    ) -> None:
         """Apply a manifest, retrying on known transient post-upgrade races:
         the admission webhook not serving yet, or the target CRD/API version
         not registered on the server yet.
@@ -538,7 +541,7 @@ class Deployer:
         deadline = time.time() + timeout
         while True:
             try:
-                self.kubectl("apply", "-n", self.namespace, "-f", tmp_path)
+                self.kubectl("apply", "-n", namespace or self.namespace, "-f", tmp_path)
                 return
             except RuntimeError as e:
                 last_error = str(e)
@@ -562,10 +565,6 @@ class Deployer:
 
         manifest_docs = self._patch_manifest(manifest_path, tc)
         service_names = self.manifest_service_names(tc)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump_all(manifest_docs, f)
-            tmp_path = f.name
-
         try:
             self.ensure_namespace()
             for name in service_names:
@@ -575,7 +574,13 @@ class Deployer:
                     for secret_name in self._collect_pull_secrets(manifest_doc):
                         self.ensure_pull_secret(secret_name)
             self._applied[tc.name] = tc
-            self._apply_with_webhook_retry(tmp_path)
+            # `kubectl apply -n` rejects documents that declare another namespace
+            # (e.g. MaaS policies), so each declared namespace is applied separately.
+            for namespace, docs in self._documents_by_namespace(manifest_docs).items():
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml") as f:
+                    yaml.dump_all(docs, f)
+                    f.flush()
+                    self._apply_with_webhook_retry(f.name, namespace=namespace)
             for name in service_names:
                 self.ensure_metrics_rbac(name)
             result.success = True
@@ -583,10 +588,32 @@ class Deployer:
         except RuntimeError as e:
             result.error = str(e)
         finally:
-            Path(tmp_path).unlink(missing_ok=True)
             result.duration = time.time() - start
 
         return result
+
+    def _documents_by_namespace(self, documents: list) -> dict[str, list]:
+        """Group manifest documents by declared namespace; undeclared ones go to the test namespace."""
+        groups: dict[str, list] = {}
+        for document in documents:
+            metadata = document.get("metadata") if isinstance(document, dict) else None
+            namespace = metadata.get("namespace") if isinstance(metadata, dict) else None
+            groups.setdefault(namespace or self.namespace, []).append(document)
+        return groups
+
+    def _extra_documents(self, tc: TestCase) -> list[tuple[str, str, str]]:
+        """``(kind, name, namespace)`` of every non-LLMInferenceService manifest document."""
+        manifest_path = self.manifest_dir / tc.deployment.manifest_path
+        if not manifest_path.is_file():
+            return []
+        extras = []
+        for document in load_manifest_documents(manifest_path):
+            if not isinstance(document, dict) or document.get("kind") in (None, "LLMInferenceService"):
+                continue
+            metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+            if metadata.get("name"):
+                extras.append((document["kind"], metadata["name"], metadata.get("namespace") or self.namespace))
+        return extras
 
     def wait_for_ready(
         self, tc: TestCase, timeout: float | None = None, print_fn=None, service_name: str | None = None
@@ -993,6 +1020,13 @@ class Deployer:
         # Issue every delete even if one fails, so a persistently failing service
         # cannot keep later services (and their GPUs) from ever being deleted.
         errors: list[RuntimeError] = []
+        # Companion resources (e.g. MaaS model refs and policies) go first, in
+        # reverse manifest order, so nothing is left referencing a deleted service.
+        for kind, name, namespace in reversed(self._extra_documents(tc)):
+            try:
+                self.kubectl("delete", kind.lower(), name, "-n", namespace, "--ignore-not-found")
+            except RuntimeError as e:
+                errors.append(e)
         for name in service_names:
             self.cleanup_metrics_rbac(name)
             try:
@@ -1047,6 +1081,8 @@ class Deployer:
         manifest_docs = [doc for doc in load_manifest_documents(path) if doc is not None]
         llmisvc_docs = llmisvc_manifest_documents(manifest_docs)
         apply_manifest_model_config(tc, path, model_name_override=self.model_override)
+        primary_metadata = llmisvc_docs[0].get("metadata") if llmisvc_docs else None
+        primary_name = primary_metadata.get("name") if isinstance(primary_metadata, dict) else None
 
         for index, manifest in enumerate(llmisvc_docs):
             metadata = manifest.get("metadata")
@@ -1107,6 +1143,7 @@ class Deployer:
                         else:
                             env_list.append(entry)
 
+        patch_maas_refs(manifest_docs, primary_name, tc.name, self.namespace)
         return manifest_docs
 
     @staticmethod

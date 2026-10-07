@@ -98,6 +98,12 @@ class MetricsCheck:
 
 
 @dataclass
+class MaaSCheck:
+    # Override the MaaSModelRef endpoint scheme, e.g. "http" where port 443 is blocked (AKS NSG).
+    endpoint_scheme: str = ""
+
+
+@dataclass
 class MultiPoolCheck:
     enabled: bool = False
     pools: list[dict] = field(default_factory=list)
@@ -203,6 +209,7 @@ class ValidateConfig:
     kv_offload_fs_min_bytes: int = 1048576  # 1M
     multi_pool: MultiPoolCheck | None = None
     benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
+    maas: MaaSCheck = field(default_factory=MaaSCheck)
 
 
 @dataclass
@@ -269,6 +276,8 @@ def _build(cls, data: dict | None):
             kwargs[snake_key] = _build(DeployConfig, val) if val else DeployConfig()
         elif "ValidateConfig" in str(hint):
             kwargs[snake_key] = _build(ValidateConfig, val) if val else ValidateConfig()
+        elif "MaaSCheck" in str(hint):
+            kwargs[snake_key] = _build(MaaSCheck, val) if val else MaaSCheck()
         else:
             kwargs[snake_key] = val
     return cls(**kwargs)

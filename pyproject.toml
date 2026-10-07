@@ -29,6 +29,9 @@ packages = ["src/conformance"]
 testpaths = ["tests"]
 addopts = "-v -s --tb=short"
 timeout = 21600
+markers = [
+    "applies_when(predicate): phase runs only for test cases where predicate(tc) is true; others are deselected",
+]
 filterwarnings = [
     "ignore::pytest.PytestCollectionWarning",
 ]

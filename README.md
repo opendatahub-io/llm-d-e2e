@@ -240,6 +240,7 @@ docker run --rm quay.io/opendatahub/llm-d-e2e --setup 3.5-GA
 | kv-offloading-cpu | 1 | KV cache offloading to CPU memory |
 | kv-offloading-tiered | 1 | KV cache offloading to CPU + filesystem tiers |
 | pd-performance | 16 | P/D benchmark with GuideLLM (4 prefill + 2 decode, NIXL, RDMA) |
+| maas-single-gpu | 1 | single-gpu served through MaaS: auth, API key, token rate limit (needs the MaaS stack) |
 
 ## Test Phases
 
@@ -255,7 +256,8 @@ Each test case runs through ordered phases:
 8. **Models** — GET /v1/models
 9. **Inference** — POST /v1/chat/completions
 10. **Metrics** — scrape and validate Prometheus metrics
-11. **Cleanup** — delete resources
+11. **MaaS** — for manifests with a `MaaSModelRef`: unauthenticated 401, API key, authenticated inference, rate limit
+12. **Cleanup** — delete resources
 
 If deploy fails (e.g., manifest missing for the selected branch), all subsequent phases for that test case are automatically skipped. CrashLoopBackOff is detected within ~45 seconds instead of waiting the full timeout.
 
@@ -318,6 +320,35 @@ The benchmark adds three phases after the standard conformance checks:
 - **test_12** — Pre-benchmark P/D metrics (raw metric dump for baseline)
 - **test_20** — GuideLLM benchmark (warmup + main run + threshold assertions)
 - **test_21** — Post-benchmark P/D metrics (validates NIXL transfers after load)
+
+## MaaS Tests
+
+`maas-single-gpu` deploys `single-gpu` through Models-as-a-Service and, after the standard llm-d phases, checks the governed route: unauthenticated request → 401, API key creation → 201, authenticated inference → 200, subscription token rate limit → 429. Its manifest (`maas-single-gpu.yaml`) holds the LLMInferenceService bound to both `inference-gateway` and `maas-default-gateway` — the MaaS controller only governs routes on the MaaS gateway — plus its `MaaSModelRef`, `MaaSAuthPolicy`, and `MaaSSubscription`. MaaS phases live in `tests/maas/` and are deselected for test cases whose manifest declares no `MaaSModelRef`.
+
+MaaS suites are versioned like the llm-d ones (`maas-3.5`, `maas-3.6`); run them against the same manifest branch as the llm-d profile, on a cluster with the MaaS stack:
+
+```bash
+uv run llm-d-e2e -p configs/profiles/3.6.yaml      --setup 3.6-ea2 --platform aks --html reports/report.html      --mock -v
+uv run llm-d-e2e -p configs/profiles/maas-3.6.yaml --setup 3.6-ea2 --platform aks --html reports/maas-report.html --mock -v
+```
+
+Prerequisites: the MaaS stack installed — RHCL (Kuadrant: Authorino, Limitador), the MaaS Postgres database and `maas-db-config` Secret, and the RHAII chart with `components.aigateway.modelsAsAService.enabled=true`, which creates both gateways. On xKS, `validation.maas.endpointScheme: http` is set because the MaaS gateway's port 443 is not reachable externally and its certificate only covers in-cluster names.
+
+Known issues:
+
+- Kuadrant policies stay Pending with "Gateway API provider (istio / envoy gateway) is not installed" when the Kuadrant operator started before Istio: restart it (`kubectl delete pod -n kuadrant-operators -l app.kubernetes.io/name=kuadrant-operator`).
+- On xKS the `maas-api-key-cleanup` CronJob fails with `CreateContainerConfigError` (runAsNonRoot with a root image) until [models-as-a-service#1627](https://github.com/opendatahub-io/models-as-a-service/pull/1627) ships; it does not affect these tests.
+
+### Sizing a mock cluster (e.g. minikube)
+
+`--mock` gives each workload container fixed resources (requests `500m`/`1Gi`, limits `1`/`2Gi`), so the platform dominates. Requests measured on AKS with RHAII 3.5 + MaaS: ~2 CPU / ~4 GiB across 22 platform pods (Istio ~0.5 CPU / 2.1 GiB, Kuadrant ~0.9 CPU / 0.7 GiB, KServe + MaaS controllers and gateways ~0.6 CPU / 1.2 GiB, maas-api + Postgres 0.1 CPU / 128 MiB). With system pods and one mock test case that is ~4 CPU / ~7 GiB of requests:
+
+```bash
+minikube start --cpus=8 --memory=16g --disk-size=60g   # minimum ~6 CPU / 12 GiB
+minikube tunnel   # keep running: gateways are LoadBalancer Services, and MaaS phases call the gateway address from the host
+```
+
+Disk covers the platform images and the Postgres PVC; the manifest's `hf://` model URI is kept in mock mode, so the node also needs internet access to Hugging Face. This sizing is derived from AKS measurements and has not been validated on minikube.
 
 ## Development
 

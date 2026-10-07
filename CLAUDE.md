@@ -62,7 +62,7 @@ The `--mode` flag controls which phases execute:
 
 ### Ordered conformance phases
 
-`test_conformance.py:TestConformance` uses numeric method name prefixes (`test_01_` through `test_99_`) for phase ordering:
+`test_conformance.py:TestConformance` composes three phase groups: `LLMDPhases` (01–21, in `test_conformance.py`), `MaaSPhases` (30a–30e, in `tests/maas/phases.py`), and `CleanupPhase` (99). pytest collects inherited test methods in reverse-MRO order, so `class TestConformance(CleanupPhase, MaaSPhases, LLMDPhases)` runs the groups in that order for each test case; within a group, methods run in definition order:
 
 | Phase | Method | What it validates |
 |-------|--------|-------------------|
@@ -85,9 +85,20 @@ The `--mode` flag controls which phases execute:
 | 15 | `test_15_metrics_lora` | LoRA adapter state metrics (`vllm:lora_requests_info`) |
 | 20 | `test_20_benchmark` | GuideLLM benchmark with performance thresholds |
 | 21 | `test_21_metrics_post_benchmark` | P/D metrics after benchmark load |
-| 99 | `test_99_cleanup` | Delete LLMInferenceService |
+| 30a | `test_30a_maas_ready` | MaaSModelRef Ready, auth policy + subscription Active; endpoint + model alias |
+| 30b | `test_30b_maas_unauthenticated` | MaaS inference without an API key → 401 |
+| 30c | `test_30c_maas_api_key` | API key creation with a K8s user token → 201 |
+| 30d | `test_30d_maas_inference` | Authenticated MaaS inference → 200 |
+| 30e | `test_30e_maas_rate_limit` | Subscription token rate limit → 429 after quota |
+| 99 | `test_99_cleanup` | Delete the manifest's resources (companion documents, then LLMInferenceServices) |
 
-Phases skip themselves based on `tc` config flags or `--mode discover`.
+Phases a test case's config turns off are deselected at collection, not skipped: each such phase carries `@pytest.mark.applies_when.with_args(predicate)`, and `conftest.py:pytest_collection_modifyitems` drops items whose `predicate(tc)` is false (the summary reports them as `deselected`). Use `.with_args(...)` — a mark called with a lone callable treats it as the decorated function. Runtime conditions (missing manifest, failed deploy, too few GPUs, `--nocleanup`, `--mode discover`) still `pytest.skip()` and show as SKIPPED.
+
+### MaaS testcases
+
+A MaaS testcase is a testcase config plus a same-named manifest (e.g. `maas-single-gpu.yaml`) holding the LLMInferenceService (bound to `inference-gateway` and `maas-default-gateway`) and its `MaaSModelRef`, `MaaSAuthPolicy`, and `MaaSSubscription`. The llm-d phases validate the model as usual; the MaaS phases are deselected unless the manifest declares a `MaaSModelRef`. MaaS code is owned separately: `tests/maas/` (phases, unit tests) and `src/conformance/maas.py` (client, readiness, manifest ref patching).
+
+Deploy applies documents that declare another namespace (MaaS policies live in `models-as-a-service`) in a separate `kubectl apply -n <namespace>`; manifests with no declared namespaces still apply in one call. `maas.patch_maas_refs()` points the `MaaSModelRef` at the renamed primary service and the policy/subscription `modelRefs` at the test namespace. Cleanup deletes non-LLMInferenceService documents in reverse manifest order before the services. `validation.maas.endpointScheme` overrides the MaaSModelRef endpoint scheme (`http` on AKS, where the gateway's port 443 is blocked).
 
 ### Skip propagation
 
@@ -183,8 +194,8 @@ Use `scripts/new-testcase.sh <name>` to generate stubs, then customize:
 
 ## Adding a New Conformance Phase
 
-1. Add a method `test_NN_<name>` to `TestConformance` in `test_conformance.py`. Pick a number between existing phases.
-2. Use `pytest.skip()` for conditions where the phase doesn't apply.
+1. Add a method `test_NN_<name>` to `LLMDPhases` in `test_conformance.py` (MaaS phases: `MaaSPhases` in `tests/maas/phases.py`). Pick a number between existing phases.
+2. Gate config-dependent phases with `@pytest.mark.applies_when.with_args(lambda tc: ...)` (deselected when false); use `pytest.skip()` only for runtime conditions.
 3. Phases receive fixtures via parameter names: `deployer`, `tc`, `client`, `endpoint`, `scraper`, `test_mode`, `no_cleanup`, `request`.
 
 ## Adding a New Metrics Validator
@@ -218,7 +229,7 @@ As of [odh-gitops PR#156](https://github.com/opendatahub-io/odh-gitops/pull/156)
 ## Config files
 
 - **configs/testcases/*.yaml** — Each file maps to one `TestCase` dataclass. Contains model info (including LoRA adapters), deployment spec, validation criteria, and metrics check flags.
-- **configs/profiles/*.yaml** — Named groups of test case names. Includes version-specific profiles (`3.4.yaml`, `3.5.yaml`, `3.5-gpu.yaml`) and topology profiles (`smoke`, `pd`, `cache-aware`, `flow-control`, `lora`).
+- **configs/profiles/*.yaml** — Named groups of test case names. Includes version-specific profiles (`3.4.yaml`, `3.5.yaml`, `3.5-gpu.yaml`, `maas-3.5.yaml`, `maas-3.6.yaml`) and topology profiles (`smoke`, `pd`, `cache-aware`, `flow-control`, `lora`).
 - **deploy/manifests/*.yaml** — LLMInferenceService manifests, cloned from the manifest repo via `--setup`. Gitignored.
 - **deploy/manifests/.manifest-ref** — Tracks the active manifest branch, repo URL, commit SHA, and clone timestamp.
 
