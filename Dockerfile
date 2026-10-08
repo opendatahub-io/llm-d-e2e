@@ -21,7 +21,7 @@ RUN uv sync --frozen
 COPY . .
 RUN rm -rf .venv && uv sync --frozen
 
-RUN git clone --depth 1 --branch ${MANIFEST_REF} ${MANIFEST_REPO} /tmp/manifests && \
+RUN git clone --depth 1 --branch "${MANIFEST_REF}" "${MANIFEST_REPO}" /tmp/manifests && \
     mkdir -p deploy/manifests && \
     cp /tmp/manifests/*.yaml deploy/manifests/ && \
     printf 'branch: %s\nrepo: %s\n' "${MANIFEST_REF}" "${MANIFEST_REPO}" > deploy/manifests/.manifest-ref && \
